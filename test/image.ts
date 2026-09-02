@@ -1,0 +1,15 @@
+import { kittyImage, placeImage, clearImages, supportsKittyGraphics } from '../src/tui/image.ts';
+let fails = 0;
+const must = (l: string, c: boolean) => { console.log(c ? `✓ ${l}` : `✗ ${l}`); if (!c) fails++; };
+const b64 = 'A'.repeat(10_000);
+const seq = kittyImage(b64, 40, 12);
+const chunks = seq.split('\x1b\\').filter(Boolean);
+must('quebra em pedaços de 4096', chunks.length === 3);
+must('primeiro pedaço declara PNG, tamanho em células e m=1', chunks[0]!.startsWith('\x1b_Ga=T,f=100,i=1,c=40,r=12,q=2,m=1;'));
+must('último pedaço fecha com m=0', chunks[2]!.startsWith('\x1b_Gm=0,q=2;'));
+must('dados intactos', chunks.map((c) => c.split(';')[1]).join('') === b64);
+must('placeImage posiciona antes', placeImage('QUJD', 5, 3, 10, 4).startsWith('\x1b[4;6H\x1b_G'));
+must('clearImages apaga tudo', clearImages() === '\x1b_Ga=d,d=A,q=2\x1b\\');
+must('detecta Ghostty', supportsKittyGraphics({ TERM_PROGRAM: 'ghostty' }) && !supportsKittyGraphics({ TERM_PROGRAM: 'Apple_Terminal', TERM: 'xterm-256color' }));
+console.log(fails ? `\n${fails} falha(s)` : '\ntudo verde');
+process.exit(fails ? 1 : 0);

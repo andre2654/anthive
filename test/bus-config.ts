@@ -1,0 +1,17 @@
+import { ensureBus } from '../src/core/project.ts';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+let fails = 0;
+const must = (l: string, c: boolean) => { console.log(c ? `✓ ${l}` : `✗ ${l}`); if (!c) fails++; };
+const d = mkdtempSync(join(tmpdir(), 'tai-bus-'));
+must('sem arquivo: cria', (await ensureBus(d)) === 'novo');
+let cfg = JSON.parse(await Bun.file(join(d, '.mcp.json')).text());
+must('entrada anthive aponta para o servidor', cfg.mcpServers.anthive.args.at(-1) === 'mcp');
+must('segunda vez não mexe', (await ensureBus(d)) === 'já estava');
+await Bun.write(join(d, '.mcp.json'), JSON.stringify({ mcpServers: { outro: { command: 'x' } } }));
+must('arquivo alheio: acrescenta sem apagar', (await ensureBus(d)) === 'atualizado');
+cfg = JSON.parse(await Bun.file(join(d, '.mcp.json')).text());
+must('o servidor do usuário continua lá', !!cfg.mcpServers.outro && !!cfg.mcpServers.anthive);
+console.log(fails ? `\n${fails} falha(s)` : '\ntudo verde');
+process.exit(fails ? 1 : 0);

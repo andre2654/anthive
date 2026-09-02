@@ -1,0 +1,16 @@
+# build
+/anthive
+/ai
+/anthive
+/dist
+*.bun-build
+.*.bun-build
+
+# deps
+node_modules
+
+# runtime leftovers
+.playwright-mcp/
+.mcp.json
+*.log
+.DS_Store

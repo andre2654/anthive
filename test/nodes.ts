@@ -1,0 +1,40 @@
+/** Tarefa no mapa com painel; ↵ numa linha de Edit abre o diff. */
+import { Grid } from '../src/tui/grid.ts';
+import { renderProject } from '../src/views/project.ts';
+import { App } from '../src/app.ts';
+import { Screen, Key } from '../src/tui/screen.ts';
+import { Ev } from '../src/core/sessions.ts';
+import type { View } from '../src/core/project.ts';
+let fails = 0;
+const must = (l: string, c: boolean) => { console.log(c ? `✓ ${l}` : `✗ ${l}`); if (!c) fails++; };
+const agent = { kind: 'agent' as const, id: 'a1', name: 'api', item: null, session: null, cwd: '/tmp' };
+const task = { kind: 'task' as const, id: 'task-a1-1', agent: 'a1', task: { id: '1', subject: 'Corrigir ARBs', description: 'remover `?` final', status: 'in_progress', active: 'Corrigindo' } };
+const v: View = { project: { id: 'p', name: 'loja', cwd: '/tmp', created: 0 }, nodes: [agent, task], edges: [{ from: 'a1', to: 'task-a1-1', kind: 'task' }] };
+const g = new Grid(130, 24);
+renderProject(g, v, 'task-a1-1', 0, '', { panel: true });
+const t = g.toString();
+must('tarefa é uma caixa no mapa com o assunto', t.includes('task') && t.includes('◉ Corrigir ARBs'));
+must('painel à direita mostra a tarefa e o estado', t.includes('tarefa ─') && t.includes('in_progress') && t.includes('remover'));
+must('cabeçalho conta a tarefa', t.includes('1 tarefa'));
+must('nenhuma linha estoura a largura', t.split('\n').every((l) => [...l].length === 130));
+const g2 = new Grid(100, 24);
+renderProject(g2, v, 'task-a1-1', 0, '', { panel: true });
+must('abaixo de 110 colunas o painel não aparece', !g2.toString().includes('in_progress') && g2.toString().includes('◉ Corrigir ARBs'));
+
+class F extends Screen { constructor() { super({ mouse: true }); this.W = 100; this.H = 26; } override measure() {} override enter() {} override restore() {} override write() {} override onKey() {} }
+const app = new App(new F());
+app.view = 'agent'; app.agent = agent as any; app.pv = v;
+const ev = (o: Partial<Ev>): Ev => ({ uuid: crypto.randomUUID(), parent: null, sidechain: false, type: 'assistant', ts: 1, role: 'assistant', text: '', ...o });
+app.evs = [ev({ type: 'user', role: 'user', text: 'troque bar por baz', full: 'troque bar por baz' }), ev({ text: 'Edit /tmp/a.ts', tool: 'Edit', input: { file_path: '/tmp/a.ts', old_string: 'bar()', new_string: 'baz()' } })];
+(app as any).rebuild(true);
+app.aCursor = app.rowsAll.findIndex((r) => r.ev);
+must('linha de Edit está marcada com ↵ diff', app.aCursor >= 0 && app.rowsAll[app.aCursor]!.detail.includes('↵ diff'));
+app.key({ k: 'enter' } as Key);
+must('↵ abre o diff', (app.view as string) === 'diff' && app.diffEv?.tool === 'Edit');
+app.render();
+const d = app.grid.toString();
+must('diff mostra − e +', d.includes('− bar()') && d.includes('+ baz()') && d.includes('+1 −1'));
+app.key({ k: 'esc' } as Key);
+must('esc volta à conversa', (app.view as string) === 'agent');
+console.log(fails ? `\n${fails} falha(s)` : '\ntudo verde');
+process.exit(fails ? 1 : 0);

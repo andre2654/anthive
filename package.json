@@ -1,0 +1,44 @@
+{
+  "name": "anthive",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "bin": {
+    "anthive": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "build": "bun build --compile --outfile anthive src/index.ts",
+    "check": "bun x tsc --noEmit",
+    "test": "bun run test/input.ts && bun run test/wrap.ts && bun run test/markdown.ts && bun run test/meta.ts && ANTHIVE_HOME=$(mktemp -d) bun run test/bus.ts && bun run test/services.ts && bun run test/bus-config.ts && ANTHIVE_HOME=$(mktemp -d) bun run test/briefing.ts && ANTHIVE_HOME=$(mktemp -d) bun run test/context.ts && ANTHIVE_HOME=$(mktemp -d) bun run test/app.ts && ANTHIVE_HOME=$(mktemp -d) bun run test/diff.ts && ANTHIVE_HOME=$(mktemp -d) bun run test/tasks.ts && ANTHIVE_HOME=$(mktemp -d) bun run test/nodes.ts && ANTHIVE_HOME=$(mktemp -d) bun run test/image.ts && ANTHIVE_HOME=$(mktemp -d) bun run test/browser.ts && ANTHIVE_HOME=$(mktemp -d) bun run test/browser-ui.ts && bun run test/px.ts && bun run test/cdp.ts && bun run test/mcp.ts && echo '✓ suíte ok'",
+    "test:chat": "ANTHIVE_HOME=$(mktemp -d) bun run test/chat.ts",
+    "shot": "python3 test/screenshot.py",
+    "test:browser": "ANTHIVE_HOME=$(mktemp -d) bun run test/e2e-browser.ts",
+    "test:chrome": "bun run test/chrome.ts",
+    "build:x64": "bun build --compile --target=bun-darwin-x64 --outfile dist/anthive-darwin-x64 src/index.ts",
+    "build:arm64": "bun build --compile --target=bun-darwin-arm64 --outfile dist/anthive-darwin-arm64 src/index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "description": "An ant hive for your Claude Code agents: a live map of agents, notes, memory, services and a browser — in the terminal.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/andresaraivafintex/anthive"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "agents",
+    "multi-agent",
+    "terminal",
+    "tui",
+    "browser",
+    "playwright",
+    "mcp"
+  ],
+  "engines": {
+    "bun": ">=1.3"
+  }
+}
