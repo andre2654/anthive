@@ -6,7 +6,7 @@ import * as P from '../src/core/project.ts';
 let fails = 0;
 const must = (l: string, c: boolean) => { console.log(c ? `✓ ${l}` : `✗ ${l}`); if (!c) fails++; };
 const ev = (o: Partial<Ev>): Ev => ({ uuid: crypto.randomUUID(), parent: null, sidechain: false, type: 'user', ts: 1, role: 'user', text: '', ...o });
-const skill = 'Base directory for this skill: /Users/x/.claude/skills/portal-skill\n\n# Portal Inter-Agent Communication\n\nYou are running inside Maestri…';
+const skill = 'Base directory for this skill: /Users/x/.claude/skills/portal-skill\n\n# Portal Inter-Agent Communication\n\nYou are running inside another canvas…';
 const rs = rows([
   ev({ text: 'crie uma nota', full: 'crie uma nota' }),
   ev({ text: skill.replace(/\s+/g, ' '), full: skill, meta: true }),
