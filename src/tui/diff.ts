@@ -7,6 +7,7 @@ import { Grid } from './grid.ts';
 import { C, G, fit } from './theme.ts';
 import { Ev } from '../core/sessions.ts';
 import { keybar, scrollHint } from '../views/chrome.ts';
+import { t } from '../i18n.ts';
 
 export interface DiffLine { kind: 'same' | 'add' | 'del'; text: string }
 export interface Hunk { tool: string; path: string; lines: DiffLine[]; note?: string }
@@ -35,10 +36,10 @@ export const isEditTool = (tool?: string) => tool === 'Edit' || tool === 'MultiE
 export function hunksOf(ev: Ev): Hunk[] {
   const inp = ev.input as any;
   const path = String(inp?.file_path ?? inp?.path ?? '');
-  if (!inp) return [{ tool: ev.tool ?? '?', path, lines: [], note: 'entrada grande demais para guardar — o transcript tem o conteúdo' }];
+  if (!inp) return [{ tool: ev.tool ?? '?', path, lines: [], note: t('input too large to keep — the transcript has it') }];
   if (ev.tool === 'Write') return [{ tool: 'Write', path, lines: String(inp.content ?? '').replace(/\n$/, '').split('\n').map((t) => ({ kind: 'add' as const, text: t })) }];
   if (ev.tool === 'MultiEdit' && Array.isArray(inp.edits)) return inp.edits.map((e: any) => ({ tool: 'MultiEdit', path, lines: diffLines(String(e.old_string ?? ''), String(e.new_string ?? '')) }));
-  return [{ tool: ev.tool ?? 'Edit', path, lines: diffLines(String(inp.old_string ?? ''), String(inp.new_string ?? '')), note: inp.replace_all ? 'todas as ocorrências' : undefined }];
+  return [{ tool: ev.tool ?? 'Edit', path, lines: diffLines(String(inp.old_string ?? ''), String(inp.new_string ?? '')), note: inp.replace_all ? t('all occurrences') : undefined }];
 }
 
 /** Desenha os hunks; devolve o total de linhas para a rolagem. */
@@ -55,7 +56,7 @@ export function renderDiff(g: Grid, ev: Ev, hunks: Hunk[], scroll: number, statu
 
   const rows: { kind: DiffLine['kind'] | 'head' | 'note'; text: string }[] = [];
   hunks.forEach((h, i) => {
-    if (hunks.length > 1) rows.push({ kind: 'head', text: `edição ${i + 1} de ${hunks.length}` });
+    if (hunks.length > 1) rows.push({ kind: 'head', text: t('edit {0} of {1}', i + 1, hunks.length) });
     if (h.note) rows.push({ kind: 'note', text: h.note });
     for (const l of h.lines) rows.push(l);
     if (i < hunks.length - 1) rows.push({ kind: 'note', text: '' });
@@ -73,6 +74,6 @@ export function renderDiff(g: Grid, ev: Ev, hunks: Hunk[], scroll: number, statu
   }
   scrollHint(g, H - 3, scroll, Math.max(0, rows.length - scroll - view));
   g.put(0, H - 3, G.teeL + G.h.repeat(W - 2) + G.teeR, C.frame);
-  keybar(g, H - 2, [['↑↓', 'rolar'], ['esc', 'voltar à conversa']], status);
+  keybar(g, H - 2, [['↑↓', t('scroll')], ['esc', t('back to the chat')]], status);
   return rows.length;
 }

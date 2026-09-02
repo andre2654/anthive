@@ -6,8 +6,8 @@
  * O pulso corre do agente para o que ele está ligado.
  */
 import { Grid, Rect } from '../tui/grid.ts';
-import { browserShort, snapshotRefs } from './item.ts';
-import { MODE_LABEL } from '../core/cdp.ts';
+import { browserShort, snapshotRefs, modeLabel } from './item.ts';
+import { t } from '../i18n.ts';
 export { snapshotRefs };
 import { C, G, BG, RGB, sparkline, ago, tok, pad, padStart, fit } from '../tui/theme.ts';
 import { State, windowOf } from '../core/sessions.ts';
@@ -24,7 +24,7 @@ const MIN_GUTTER = 12;
 
 const GLYPH: Record<State, string> = { running: G.running, waiting: G.waiting, idle: G.idle, stuck: G.stuck, sleeping: G.idle };
 const COLOR: Record<State, RGB> = { running: C.run, waiting: C.hold, idle: C.idle, stuck: C.dead, sleeping: C.frame };
-const LABEL: Record<State, string> = { running: 'rodando', waiting: 'aprovação', idle: 'ocioso', stuck: 'travado', sleeping: 'dormindo' };
+const LABEL = (s: State) => ({ running: t('running'), waiting: t('approval'), idle: t('idle'), stuck: t('stuck'), sleeping: t('asleep') })[s];
 const SPARK: Record<State, RGB> = { running: C.sparkR, waiting: C.sparkH, idle: C.sparkI, stuck: C.sparkD, sleeping: C.sparkI };
 export const KIND_GLYPH = { agent: G.running, note: G.note, file: '▤', service: '◎', task: G.focus, browser: '▣' } as const;
 export const PANEL_W = 34;
@@ -137,11 +137,11 @@ function agentBox(g: Grid, n: AgentNode, r: Rect, on: boolean, src: boolean) {
   if (on || src) g.fill(r, BG.sel);
   const border = src ? C.hold : on ? C.link : C.frame;
   g.frame(r, `${src ? G.tool + ' ' : ''}${n.name}`, src ? C.hold : on ? C.link : C.inkHi, border);
-  g.put(r.x + 2, r.y + 1, pad(`${GLYPH[state]} ${LABEL[state]}`, inner - 7), COLOR[state]);
+  g.put(r.x + 2, r.y + 1, pad(`${GLYPH[state]} ${LABEL(state)}`, inner - 7), COLOR[state]);
   g.put(r.x + 2 + inner - 7, r.y + 1, padStart(s ? ago(s.ageMs) : '', 7), C.frame);
   const branch = n.item?.worktree ?? (s?.branch && s.branch !== 'HEAD' ? s.branch : '');
   const doing = s?.lastText.replace(/^(\w+ )?cd \S+\s*(&&\s*)?/, '$1') ?? '';
-  const l2 = s?.state === 'waiting' || s?.state === 'stuck' ? `${G.pause} ${s.pendingTool ?? '?'}` : branch || doing || (n.item ? 'sem sessão — ↵ abre o chat' : '');
+  const l2 = s?.state === 'waiting' || s?.state === 'stuck' ? `${G.pause} ${s.pendingTool ?? '?'}` : branch || doing || (n.item ? t('no session — ↵ opens the chat') : '');
   g.put(r.x + 2, r.y + 2, pad(l2, inner), s?.state === 'waiting' ? C.hold : branch ? C.link : C.frame);
   const ctx = s?.context ? `${tok(s.context)}` : '';
   const sw = Math.max(4, inner - (ctx ? ctx.length + 2 : 0));
@@ -154,24 +154,24 @@ function itemBox(g: Grid, n: Node, r: Rect, on: boolean, src: boolean) {
   const inner = r.w - 4;
   if (on || src) g.fill(r, BG.sel);
   const border = src ? C.hold : on ? C.link : C.frame;
-  const title = n.kind === 'note' ? 'note' : n.kind === 'file' ? (n.item.context ? 'contexto' : 'file') : n.kind === 'task' ? 'task' : n.kind === 'browser' ? 'browser' : 'service';
-  const ttl = n.kind === 'file' && n.item.context ? 'contexto' : title;
+  const title = n.kind === 'note' ? t('note') : n.kind === 'file' ? (n.item.context ? t('context') : t('file')) : n.kind === 'task' ? t('task') : n.kind === 'browser' ? 'browser' : t('service');
+  const ttl = title;
   g.frame(r, `${src ? G.tool + ' ' : ''}${ttl}`, src ? C.hold : on ? C.link : C.linkDim, border);
   const home = process.env.HOME ?? '';
   if (n.kind === 'note') {
     g.put(r.x + 2, r.y + 1, pad(`${G.note} ${n.doc.title}`, inner), C.link);
-    const who = n.doc.acl.length ? `lê: ${n.doc.acl.join(', ')}` : 'ninguém lê ainda';
-    g.put(r.x + 2, r.y + 2, pad(`${n.doc.ttl ? 'efêmera' : 'persistente'}  ${G.h}  ${who}`, inner), C.dim);
+    const who = n.doc.acl.length ? t('read by: {0}', n.doc.acl.join(', ')) : t('nobody reads it yet');
+    g.put(r.x + 2, r.y + 2, pad(`${n.doc.ttl ? t('ephemeral') : t('persistent')}  ${G.h}  ${who}`, inner), C.dim);
   } else if (n.kind === 'file' && n.item.context) {
     g.put(r.x + 2, r.y + 1, pad(`▤ ${n.item.label}`, inner), C.link);
-    const what = n.item.context === 'claude' ? 'contexto do ambiente — o Claude lê em toda sessão' : 'memória automática do Claude neste projeto';
-    g.put(r.x + 2, r.y + 2, pad(`${what}  ${G.h}  ${n.lines ?? 0} linhas`, inner), C.dim);
+    const what = n.item.context === 'claude' ? t('environment context — Claude reads it every session') : t('Claude automatic memory for this project');
+    g.put(r.x + 2, r.y + 2, pad(`${what}  ${G.h}  ${t('{0} lines', n.lines ?? 0)}`, inner), C.dim);
   } else if (n.kind === 'file') {
     const dir = n.item.path.slice(0, -n.item.label.length).replace(home, '~');
     const lab = `▤ ${n.item.label}`;
     g.put(r.x + 2, r.y + 1, pad(lab, inner), n.exists ? C.ink : C.dead);
     const rest = inner - [...lab].length - 2;
-    if (rest > 6) g.put(r.x + 2 + [...lab].length + 2, r.y + 1, fit(n.exists ? dir : 'não existe mais', rest), C.frame);
+    if (rest > 6) g.put(r.x + 2 + [...lab].length + 2, r.y + 1, fit(n.exists ? dir : t('gone'), rest), C.frame);
   } else if (n.kind === 'task') {
     const st = n.task.status;
     const glyph = st === 'completed' ? G.running : st === 'in_progress' ? G.focus : G.idle;
@@ -179,13 +179,13 @@ function itemBox(g: Grid, n: Node, r: Rect, on: boolean, src: boolean) {
     g.put(r.x + 2, r.y + 1, pad(`${glyph} ${n.task.subject}`, inner), col);
   } else if (n.kind === 'browser') {
     const st = n.state;
-    const l1 = st.busy ? `${G.running} ${browserShort(st.lastTool ?? 'browser_')}…` : `▣ chrome (${MODE_LABEL[n.item.mode] ?? n.item.mode})${st.live ? ` ${G.running} ao vivo` : ''}  ${G.h}  ${st.title || 'sem página ainda'}`;
+    const l1 = st.busy ? `${G.running} ${browserShort(st.lastTool ?? 'browser_')}…` : `▣ chrome (${modeLabel(n.item.mode)})${st.live ? ` ${G.running} ${t('live')}` : ''}  ${G.h}  ${st.title || t('no page yet')}`;
     g.put(r.x + 2, r.y + 1, pad(l1, inner), st.busy ? C.hold : st.url ? C.run : C.dim);
-    g.put(r.x + 2, r.y + 2, pad(st.url || 'ligue um agente (l) e peça para navegar', inner), C.dim);
+    g.put(r.x + 2, r.y + 2, pad(st.url || t('link an agent (l) and ask it to browse'), inner), C.dim);
   } else if (n.kind === 'service') {
     const port = n.item.port ? `:${n.item.port}` : '';
     g.put(r.x + 2, r.y + 1, pad(`◎ ${n.item.name}${port}`, inner), n.alive ? C.run : C.dead);
-    g.put(r.x + 2, r.y + 2, pad(`pid ${n.item.pid}  ${G.h}  ${n.alive ? 'vivo' : 'morto'}  ${G.h}  ${fit(n.item.cwd.replace(home, '~'), Math.max(6, inner - 22))}`, inner), C.dim);
+    g.put(r.x + 2, r.y + 2, pad(`pid ${n.item.pid}  ${G.h}  ${n.alive ? t('alive') : t('dead')}  ${G.h}  ${fit(n.item.cwd.replace(home, '~'), Math.max(6, inner - 22))}`, inner), C.dim);
   }
   g.hit(n.id, r);
 }
@@ -200,7 +200,7 @@ function stroke(g: Grid, x: number, y: number, ch: string, col: RGB) {
 
 function drawPath(g: Grid, p: Path, e: Edge, W: number, arrow = true) {
   const talk = e.kind === 'talk';
-  const col = talk ? (e.thread && threadState(e.thread).state === 'estourada' ? C.hold : C.link) : e.kind === 'context' ? C.linkDim : C.frame;
+  const col = talk ? (e.thread && threadState(e.thread).state === 'exhausted' ? C.hold : C.link) : e.kind === 'context' ? C.linkDim : C.frame;
   const H = talk ? G.hH : G.h, V = talk ? G.hV : G.v;
   const cs = p.cells;
   for (let i = 0; i < cs.length; i++) {
@@ -219,8 +219,8 @@ function drawPath(g: Grid, p: Path, e: Edge, W: number, arrow = true) {
   if (talk && e.thread) {
     const st = threadState(e.thread);
     const mid = cs[Math.floor(cs.length / 2)]!;
-    const tag = `${st.state === 'estourada' ? G.pause : G.swap} ${st.turn}/${st.budget}`;
-    if (mid[0] + 2 + tag.length < W - 1) g.put(mid[0] + 2, mid[1], tag, st.state === 'estourada' ? C.hold : C.inkHi);
+    const tag = `${st.state === 'exhausted' ? G.pause : G.swap} ${st.turn}/${st.budget}`;
+    if (mid[0] + 2 + tag.length < W - 1) g.put(mid[0] + 2, mid[1], tag, st.state === 'exhausted' ? C.hold : C.inkHi);
   }
 }
 
@@ -239,55 +239,55 @@ function drawNodePanel(g: Grid, v: View, n: Node, top: number, bottom: number) {
   const links = v.edges.filter((e) => e.from === n.id || e.to === n.id).map((e) => v.nodes.find((m) => m.id === (e.from === n.id ? e.to : e.from))).filter((m): m is Node => !!m);
   const home = process.env.HOME ?? '';
 
-  head(n.kind === 'agent' ? 'agente' : n.kind === 'note' ? 'nota' : n.kind === 'file' ? 'arquivo' : n.kind === 'task' ? 'tarefa' : n.kind === 'browser' ? 'browser' : 'serviço');
+  head(n.kind === 'agent' ? t('agent') : n.kind === 'note' ? t('note') : n.kind === 'file' ? t('file') : n.kind === 'task' ? t('task') : n.kind === 'browser' ? 'browser' : t('service'));
   if (n.kind === 'agent') {
     const s = n.session;
-    row('nome', n.name, C.inkHi);
-    row('estado', s ? `${GLYPH[s.state]} ${LABEL[s.state]}  ${ago(s.ageMs)}` : 'sem sessão', s ? COLOR[s.state] : C.dim);
-    if (s) { const win = winOf(s.model, s.context); row('contexto', `${gauge(s.context / win, 8)} ${Math.round((100 * s.context) / win)}%`, s.context / win > 0.85 ? C.hold : C.run); row('modelo', s.model || '—'); row('branch', n.item?.worktree ?? s.branch); }
-    y++; head('faz agora'); text(s?.lastText.replace(/^(\w+ )?cd \S+\s*(&&\s*)?/, '$1') || 'nada ainda', C.ink, 4);
+    row(t('name'), n.name, C.inkHi);
+    row(t('state'), s ? `${GLYPH[s.state]} ${LABEL(s.state)}  ${ago(s.ageMs)}` : t('no session'), s ? COLOR[s.state] : C.dim);
+    if (s) { const win = winOf(s.model, s.context); row(t('context'), `${gauge(s.context / win, 8)} ${Math.round((100 * s.context) / win)}%`, s.context / win > 0.85 ? C.hold : C.run); row(t('model'), s.model || '—'); row('branch', n.item?.worktree ?? s.branch); }
+    y++; head(t('doing now')); text(s?.lastText.replace(/^(\w+ )?cd \S+\s*(&&\s*)?/, '$1') || t('nothing yet'), C.ink, 4);
     const tasks = v.nodes.filter((m): m is TaskNode => m.kind === 'task' && m.agent === n.id);
-    y++; head(`tarefas${tasks.length ? ` (${tasks.length})` : ''}`);
-    if (!tasks.length) row('', 'nenhuma', C.dim);
+    y++; head(`${t('tasks')}${tasks.length ? ` (${tasks.length})` : ''}`);
+    if (!tasks.length) row('', t('none'), C.dim);
     for (const t of tasks.slice(0, 5)) row('', `${t.task.status === 'completed' ? G.running : t.task.status === 'in_progress' ? G.focus : G.idle} ${t.task.subject}`, t.task.status === 'completed' ? C.run : t.task.status === 'in_progress' ? C.hold : C.dim);
   } else if (n.kind === 'note') {
-    row('título', n.doc.title, C.inkHi);
-    row('vida', n.doc.ttl ? `efêmera, ${ago(n.doc.ttl - Date.now())}` : 'persistente');
-    row('lê', n.doc.acl.join(', ') || 'ninguém', n.doc.acl.length ? C.link : C.dim);
-    y++; head('conteúdo'); text(n.doc.body.trim() || '(vazia)', C.ink, 12);
+    row(t('title'), n.doc.title, C.inkHi);
+    row(t('life'), n.doc.ttl ? t('ephemeral, {0}', ago(n.doc.ttl - Date.now())) : t('persistent'));
+    row(t('read by'), n.doc.acl.join(', ') || t('nobody'), n.doc.acl.length ? C.link : C.dim);
+    y++; head(t('content')); text(n.doc.body.trim() || t('(empty)'), C.ink, 12);
   } else if (n.kind === 'file') {
-    row('arquivo', n.item.label, C.inkHi);
-    row('onde', n.item.path.slice(0, -n.item.label.length).replace(home, '~'));
-    row('linhas', n.lines ? String(n.lines) : '—');
-    if (n.item.context) { y++; text(n.item.context === 'claude' ? 'Contexto de ambiente: o Claude lê este arquivo em toda sessão deste projeto.' : 'Índice da memória automática do Claude para este projeto.', C.dim, 4); }
-    if (!n.exists) row('', 'não existe mais', C.dead);
+    row(t('file'), n.item.label, C.inkHi);
+    row(t('where'), n.item.path.slice(0, -n.item.label.length).replace(home, '~'));
+    row(t('lines'), n.lines ? String(n.lines) : '—');
+    if (n.item.context) { y++; text(n.item.context === 'claude' ? t('Environment context: Claude reads this file in every session of this project.') : t('Index of Claude automatic memory for this project.'), C.dim, 4); }
+    if (!n.exists) row('', t('gone'), C.dead);
   } else if (n.kind === 'task') {
     const agent = v.nodes.find((m) => m.id === n.agent);
-    row('estado', `${n.task.status === 'completed' ? G.running : n.task.status === 'in_progress' ? G.focus : G.idle} ${n.task.status}`, n.task.status === 'completed' ? C.run : n.task.status === 'in_progress' ? C.hold : C.dim);
-    row('de', agent && agent.kind === 'agent' ? agent.name : '?', C.link);
-    if (n.task.active) row('agora', n.task.active);
-    y++; head('tarefa'); text(`**${n.task.subject}**\n\n${n.task.description || '_sem descrição_'}`, C.ink, 10);
+    row(t('state'), `${n.task.status === 'completed' ? G.running : n.task.status === 'in_progress' ? G.focus : G.idle} ${n.task.status}`, n.task.status === 'completed' ? C.run : n.task.status === 'in_progress' ? C.hold : C.dim);
+    row(t('from'), agent && agent.kind === 'agent' ? agent.name : '?', C.link);
+    if (n.task.active) row(t('now'), n.task.active);
+    y++; head(t('task')); text(`**${n.task.subject}**\n\n${n.task.description || t('_no description_')}`, C.ink, 10);
   } else if (n.kind === 'browser') {
-    row('página', n.state.title || '—', C.inkHi);
-    row('url', n.state.url || 'nenhuma ainda');
-    row('modo', `${MODE_LABEL[n.item.mode] ?? n.item.mode}${n.state.live ? ' · ao vivo' : ''}`, n.state.live ? C.run : C.ink);
-    row('porta', String(n.item.port));
-    row('último', n.state.lastTool ? browserShort(n.state.lastTool) + (n.state.busy ? '…' : '') : '—', n.state.busy ? C.hold : C.ink);
-    if (n.state.counts) row('console', n.state.counts, n.state.counts.startsWith('0 erro') ? C.ink : C.hold);
+    row(t('page'), n.state.title || '—', C.inkHi);
+    row('url', n.state.url || t('no url yet'));
+    row(t('mode'), `${modeLabel(n.item.mode)}${n.state.live ? ` · ${t('live')}` : ''}`, n.state.live ? C.run : C.ink);
+    row(t('port'), String(n.item.port));
+    row(t('last'), n.state.lastTool ? browserShort(n.state.lastTool) + (n.state.busy ? '…' : '') : '—', n.state.busy ? C.hold : C.ink);
+    if (n.state.counts) row('console', n.state.counts, /^0 /.test(n.state.counts) ? C.ink : C.hold);
     y++; head('snapshot');
     const snap = snapshotRefs(n.state.snapshot).slice(0, 8);
-    if (!snap.length) row('', 'nenhum ainda', C.dim);
+    if (!snap.length) row('', t('none yet'), C.dim);
     for (const it of snap) row(it.ref, it.text, C.dim);
   } else {
-    row('serviço', `${n.item.name}${n.item.port ? `:${n.item.port}` : ''}`, C.inkHi);
-    row('estado', n.alive ? `${G.running} vivo` : `${G.stuck} morto`, n.alive ? C.run : C.dead);
+    row(t('service'), `${n.item.name}${n.item.port ? `:${n.item.port}` : ''}`, C.inkHi);
+    row(t('state'), n.alive ? `${G.running} ${t('alive')}` : `${G.stuck} ${t('dead')}`, n.alive ? C.run : C.dead);
     row('pid', String(n.item.pid));
-    row('onde', n.item.cwd.replace(home, '~') || '—');
+    row(t('where'), n.item.cwd.replace(home, '~') || '—');
   }
-  y++; head(`ligações${links.length ? ` (${links.length})` : ''}`);
-  if (!links.length) row('', 'nenhuma — l liga', C.dim);
+  y++; head(`${t('links')}${links.length ? ` (${links.length})` : ''}`);
+  if (!links.length) row('', t('none — l links'), C.dim);
   for (const m of links.slice(0, 6)) row('', `${m.kind === 'agent' ? G.swap : KIND_GLYPH[m.kind]} ${nodeName(m)}`, m.kind === 'agent' || m.kind === 'note' ? C.link : C.ink);
-  if (y <= bottom) g.put(x, bottom, fit(`↵ abre  ${G.h}  ] esconde o painel`, w), C.frame);
+  if (y <= bottom) g.put(x, bottom, fit(`${t('↵ opens')}  ${G.h}  ${t('] hides the panel')}`, w), C.frame);
 }
 
 export function renderProject(g: Grid, v: View, selected: string | null, scroll: number, status: string, opts: ProjectOpts = {}) {
@@ -298,17 +298,17 @@ export function renderProject(g: Grid, v: View, selected: string | null, scroll:
   const home = process.env.HOME ?? '';
 
   g.frame({ x: 0, y: 0, w: W, h: H }, 'anthive', C.inkHi);
-  const t = ` ${v.project.name} `;
-  g.put(13, 0, t, C.link);
-  g.put(13 + t.length, 0, fit(`${G.h} ${v.project.cwd.replace(home, '~')} `, Math.max(0, W - 40 - t.length)), C.dim);
+  const tt = ` ${v.project.name} `;
+  g.put(13, 0, tt, C.link);
+  g.put(13 + tt.length, 0, fit(`${G.h} ${v.project.cwd.replace(home, '~')} `, Math.max(0, W - 40 - t.length)), C.dim);
   const nA = v.nodes.filter((n) => n.kind === 'agent').length, nN = v.nodes.filter((n) => n.kind === 'note').length;
   const nF = v.nodes.filter((n) => n.kind === 'file').length, nS = v.nodes.filter((n) => n.kind === 'service').length, nT = v.nodes.filter((n) => n.kind === 'task').length;
-  const counts = [nA && `${nA} agente${nA > 1 ? 's' : ''}`, nN && `${nN} nota${nN > 1 ? 's' : ''}`, nT && `${nT} tarefa${nT > 1 ? 's' : ''}`, nF && `${nF} arquivo${nF > 1 ? 's' : ''}`, nS && `${nS} serviço${nS > 1 ? 's' : ''}`].filter(Boolean).join(` ${G.h} `);
+  const counts = [nA && t('{0} agent{1}', nA, nA > 1 ? 's' : ''), nN && t('{0} note{1}', nN, nN > 1 ? 's' : ''), nT && t('{0} task{1}', nT, nT > 1 ? 's' : ''), nF && t('{0} file{1}', nF, nF > 1 ? 's' : ''), nS && t('{0} service{1}', nS, nS > 1 ? 's' : '')].filter(Boolean).join(` ${G.h} `);
   if (counts) g.put(W - 4 - counts.length, 0, ` ${counts} `, C.dim);
 
   const vis = (r: Rect) => r.y >= top && r.y + r.h - 1 <= bottom;
   if (!v.nodes.length) {
-    const msg = 'projeto vazio — n cria um agente, uma nota, um arquivo ou um serviço';
+    const msg = t('empty project — n creates an agent, a note, a file or a service');
     g.put(Math.max(2, Math.floor((W - msg.length) / 2)), Math.floor(H / 2), msg, C.dim);
   }
   for (const b of L.boxes) {
@@ -356,8 +356,8 @@ export function renderProject(g: Grid, v: View, selected: string | null, scroll:
   scrollHint(g, H - 3, all.filter((r) => r.y < top).length, all.filter((r) => r.y + r.h - 1 > bottom).length);
   if (src) {
     const name = (id: string) => { const n = v.nodes.find((x) => x.id === id); return n ? nodeName(n) : '?'; };
-    keybar(g, H - 2, [[`${G.tool} ligar`, `${name(src)} ${G.arrow} ${selected && selected !== src ? name(selected) : '…'}`], ['setas', 'escolhem'], ['↵', 'confirma'], ['esc', 'cancela']], '', `${G.tool} ligar`);
+    keybar(g, H - 2, [[`${G.tool} ${t('link')}`, `${name(src)} ${G.arrow} ${selected && selected !== src ? name(selected) : '…'}`], [t('arrows'), t('choose')], ['↵', t('confirm')], ['esc', t('cancel')]], '', `${G.tool} ${t('link')}`);
     return;
   }
-  keybar(g, H - 2, [['↑↓←→', 'navegar'], ['↵', 'abrir'], ['n', 'novo'], ['l', 'ligar'], ['d', 'remover'], [']', 'painel'], ['esc', 'projetos'], ['q', 'sair']], status);
+  keybar(g, H - 2, [['↑↓←→', t('navigate')], ['↵', t('open')], ['n', t('new')], ['l', t('link')], ['d', t('remove')], [']', t('panel')], ['esc', t('projects')], ['q', t('quit')]], status);
 }

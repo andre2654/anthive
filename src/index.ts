@@ -46,7 +46,7 @@ if (cmd === '--help' || cmd === '-h' || cmd === 'help') {
   anthive install-mcp   register the agent bus in the current directory's .mcp.json
   anthive mcp           run the MCP server (agents call this; you don't)
 
-  env: ANTHIVE_HOME (data dir, default ~/.anthive)  ANTHIVE_LANG=en|pt`);
+  env: ANTHIVE_HOME (data dir, default ~/.anthive)`);
   process.exit(0);
 }
 

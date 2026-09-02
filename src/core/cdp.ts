@@ -8,9 +8,9 @@
 import { readdir, access, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { t } from '../i18n.ts';
 
-export type BrowserMode = 'oculto' | 'janela';
-export const MODE_LABEL: Record<BrowserMode, string> = { oculto: 'oculto', janela: 'janela' };
+export type BrowserMode = 'hidden' | 'window';
 
 export interface Chrome { bundle: string; bin: string; name: string }
 
@@ -43,13 +43,13 @@ export function launchArgs(profile: string, port: number, mode: BrowserMode): st
     '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling', '--window-size=1200,800',
   ];
   // oculto: headless novo, nem janela nem Dock. janela: sem janela inicial — ela nasce quando alguém navega, e aí não rouba o foco.
-  return mode === 'oculto' ? ['--headless=new', ...common, 'about:blank'] : ['--no-startup-window', ...common];
+  return mode === 'hidden' ? ['--headless=new', ...common, 'about:blank'] : ['--no-startup-window', ...common];
 }
 
 export async function launchChrome(chrome: Chrome, profile: string, port: number, mode: BrowserMode) {
   await mkdir(profile, { recursive: true });
   const args = launchArgs(profile, port, mode);
-  if (mode === 'oculto') {
+  if (mode === 'hidden') {
     // sessão própria (setsid), sem terminal: sobrevive ao anthive fechar — nohup não basta, o Chrome reinstala o SIGHUP.
     // perl vem com o macOS; setsid(1) não.
     const detach = 'use POSIX; POSIX::setsid(); open(STDIN, "</dev/null"); open(STDOUT, ">/dev/null"); open(STDERR, ">/dev/null"); exec @ARGV or exit 1;';
@@ -149,7 +149,7 @@ export class Cdp {
     return new Promise((res, rej) => {
       const ws = new WebSocket(url);
       ws.onopen = () => res(new Cdp(ws));
-      ws.onerror = () => rej(new Error('não conectou ao CDP'));
+      ws.onerror = () => rej(new Error(t('could not connect to CDP')));
     });
   }
   private onMessage(raw: string) {

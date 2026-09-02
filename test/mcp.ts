@@ -44,19 +44,19 @@ must('thread_list mostra a conversa', text(res[2]).includes('fechar o schema'));
 // --- db lê a caixa e responde ---
 res = await session('db', [init, call(2, 'inbox'), call(3, 'thread_post', { id: 'dm-api-db', text: 'índice parcial' })]);
 must('inbox entrega a mensagem', text(res[1]).includes('chave_idem'));
-must('inbox marca como dado de terceiro', text(res[1]).includes('DADO'));
+must('inbox marca como dado de terceiro', text(res[1]).includes('DATA'));
 must('thread_post avança o turno', text(res[2]).includes('2/6'));
 
 // --- quem está fora não entra ---
 res = await session('ui', [init, call(2, 'thread_read', { id: 'dm-api-db' })]);
-must('agente fora da ACL é barrado', text(res[1]).includes('não participa'));
+must('agente fora da ACL é barrado', text(res[1]).includes('not part'));
 
 // --- conclusão grava nota ---
 res = await session('db', [init, call(2, 'thread_conclude', { id: 'dm-api-db', decision: 'índice parcial where not null' })]);
 must('conclude grava a decisão numa nota', /note:\/\//.test(text(res[1])));
 
 res = await session('db', [init, call(2, 'notes_list'), call(3, 'note_write', { title: 'observação do db', text: 'o retry vem sem chave', ttl: '2h' })]);
-must('notes_list mostra a nota da decisão', text(res[1]).includes('note://'));
+must('notes_list mostra a note da decisão', text(res[1]).includes('note://'));
 must('note_write cria efêmera', text(res[2]).includes('note://'));
 
 // --- erro de ferramenta não derruba o servidor ---

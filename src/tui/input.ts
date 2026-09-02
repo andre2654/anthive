@@ -1,4 +1,5 @@
 import { Key } from './screen.ts';
+import { t } from '../i18n.ts';
 
 /** Campo de texto de uma linha. Guarda o cursor em índice de caractere, não de byte. */
 export class TextInput {
@@ -121,7 +122,7 @@ export class Form {
       }
       const miss = this.missing();
       if (miss) {
-        this.error = `"${miss.label}" é obrigatório`;
+        this.error = t('"{0}" is required', miss.label);
         this.active = this.fields.indexOf(miss);
         return 'pending';
       }

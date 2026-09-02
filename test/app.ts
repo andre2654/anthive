@@ -21,7 +21,7 @@ const app = new App(new F());
 const settle = async () => { await app.lastOp; await new Promise((r) => setTimeout(r, 30)); };
 await app.load();
 app.render();
-must('início mostra o + Novo', app.grid.toString().includes('+ Novo'));
+must('início mostra o + Novo', app.grid.toString().includes('+ New'));
 
 // --- novo projeto pelo modal ---
 type(app, 'n');
@@ -32,13 +32,13 @@ await settle();
 must('projeto criado e aberto', app.view === 'project' && app.project?.name === 'pedidos');
 must('cartão do projeto aparece no registro', (await P.listProjects()).some((p) => p.name === 'pedidos'));
 app.render();
-must('projeto vazio explica o que fazer', app.grid.toString().includes('projeto vazio'));
+must('projeto vazio explica o que fazer', app.grid.toString().includes('empty project'));
 
 // --- novo agente (sem instrução: não roda nada) ---
 type(app, 'n');
 must('n abre o seletor de tipo', app.modal?.kind === 'pick');
 press(app, 'enter');                       // agente
-must('agente pede nome', app.modal?.kind === 'form' && app.modal.form.title === 'novo agente');
+must('agente pede nome', app.modal?.kind === 'form' && app.modal.form.title === 'new agent');
 type(app, 'api'); press(app, 'enter'); press(app, 'enter');   // nome → worktree vazio → envia
 await settle();
 must('agente api existe no grafo', app.pv?.nodes.some((n) => n.kind === 'agent' && n.name === 'api') === true);
@@ -50,7 +50,7 @@ must('nota abre campo inline preso ao api', !!app.inline && app.inline.label.inc
 type(app, 'idempotência é chave do cliente @2h'); press(app, 'enter');
 await settle();
 const note = app.pv?.nodes.find((n): n is P.NoteNode => n.kind === 'note');
-must('nota existe no projeto', !!note && note.doc.project === app.project!.id);
+must('nota existe added to the project', !!note && note.doc.project === app.project!.id);
 must('nota já é lida pelo api', !!note && note.doc.acl.includes('api'));
 must('@2h virou efêmera', !!note && note.doc.ttl !== null);
 must('aresta api→nota existe', app.pv?.edges.some((e) => e.kind === 'context' && e.to === note!.id) === true);
@@ -62,8 +62,8 @@ type(app, 'n'); press(app, 'down'); press(app, 'down'); press(app, 'enter');   /
 type(app, 'order.ts'); press(app, 'enter');
 await settle();
 const file = app.pv?.nodes.find((n): n is P.FileNode => n.kind === 'file');
-must('arquivo entrou no projeto', !!file && file.item.label === 'order.ts');
-must('arquivo já ligado ao agente selecionado', app.pv?.edges.some((e) => e.to === file!.id) === true);
+must('arquivo entrou added to the project', !!file && file.item.label === 'order.ts');
+must('arquivo já ligado ao agent selecionado', app.pv?.edges.some((e) => e.to === file!.id) === true);
 
 // --- segundo agente e ligação por gesto (conversa pede objetivo) ---
 type(app, 'n'); press(app, 'enter'); type(app, 'db'); press(app, 'enter'); press(app, 'enter');
@@ -73,7 +73,7 @@ const db = app.pv!.nodes.find((n): n is P.AgentNode => n.kind === 'agent' && n.n
 app.sel = api.id; type(app, 'l');
 must('l entra em modo de ligação', app.linking?.source === api.id);
 app.sel = db.id; press(app, 'enter'); await settle();
-must('agente⇄agente pede o objetivo numa linha', !!app.inline && app.inline.label.includes('objetivo'));
+must('agente⇄agente pede o objetivo numa linha', !!app.inline && app.inline.label.includes('goal'));
 type(app, 'fechar o schema'); press(app, 'enter'); await settle();
 must('conversa gravada', (await store.list('thread')).some((t) => t.goal === 'fechar o schema'));
 must('aresta de conversa no grafo', app.pv?.edges.some((e) => e.kind === 'talk') === true);
@@ -92,16 +92,16 @@ must('arquivo saiu do projeto', !app.pv?.nodes.some((n) => n.id === file!.id));
 
 // --- tela do agente: caixa de escrita e seletor ---
 app.sel = api.id; press(app, 'enter'); await settle();
-must('↵ no agente abre a tela dele', app.view === 'agent' && app.agent?.name === 'api');
+must('↵ no agent abre a tela dele', app.view === 'agent' && app.agent?.name === 'api');
 app.render();
-must('faixa de ligações lista a nota e a conversa', app.grid.toString().includes('ligado a') && app.grid.toString().includes('db 0/6'));
+must('faixa de ligações lista a note e a conversa', app.grid.toString().includes('linked to') && app.grid.toString().includes('db 0/6'));
 type(app, 'e');
-must('e abre o seletor de esforço', app.modal?.kind === 'pick' && app.modal.title === 'esforço');
+must('e abre o seletor de esforço', app.modal?.kind === 'pick' && app.modal.title === 'effort');
 press(app, 'esc');
 press(app, 'esc'); await settle();
 must('esc volta ao projeto', app.view === 'project');
 press(app, 'esc'); await settle();
-must('esc de novo volta aos projetos', app.view === 'home');
+must('esc de novo volta aos projects', app.view === 'home');
 
 console.log(fails ? `\n${fails} falha(s)` : '\ntudo verde');
 process.exit(fails ? 1 : 0);

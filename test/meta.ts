@@ -14,7 +14,7 @@ const rs = rows([
 ], '', new Set(), 60);
 must('só um turno "você"', rs.filter((r) => r.kind === 'turn').length === 1);
 const sk = rs.find((r) => r.name === 'skill');
-must('skill aparece como linha própria, com o nome', !!sk && sk.detail.startsWith('maestri carregada'));
+must('skill aparece como linha própria, com o nome', !!sk && sk.detail.startsWith('maestri loaded'));
 must('nada da skill vira fala sua', !rs.some((r) => r.kind === 'turn' && r.detail.includes('Base directory')));
 
 const c = new ChatSession({ cwd: '/tmp', resume: 'abc' }, () => {});

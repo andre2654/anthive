@@ -71,7 +71,7 @@ function frontmatter(d: Omit<Doc, 'body' | 'path'>): string {
     `kind: ${d.kind}`,
     `title: ${d.title}`,
     `acl: ${d.acl.join(', ')}`,
-    `ttl: ${d.ttl ? new Date(d.ttl).toISOString() : 'persistente'}`,
+    `ttl: ${d.ttl ? new Date(d.ttl).toISOString() : 'none'}`,
     `created: ${new Date(d.created).toISOString()}`,
   ];
   if (d.goal !== undefined) lines.push(`goal: ${d.goal}`);
@@ -89,13 +89,13 @@ function parse(text: string, path: string, kind: Kind): Doc | null {
     const i = line.indexOf(':');
     if (i > 0) head[line.slice(0, i).trim()] = line.slice(i + 1).trim();
   }
-  const ttlRaw = head.ttl ?? 'persistente';
+  const ttlRaw = head.ttl ?? 'none';
   return {
     id: head.id ?? '?',
     kind: (head.kind as Kind) ?? kind,
     title: head.title ?? head.id ?? '?',
     acl: (head.acl ?? '').split(',').map((s) => s.trim()).filter(Boolean),
-    ttl: ttlRaw === 'persistente' ? null : Date.parse(ttlRaw) || null,
+    ttl: ttlRaw === 'none' || ttlRaw === 'persistente' ? null : Date.parse(ttlRaw) || null,   // 'persistente': notes written before the rename
     created: Date.parse(head.created ?? '') || 0,
     goal: head.goal,
     budget: head.budget ? Number(head.budget) : undefined,
@@ -128,7 +128,7 @@ export async function create(opts: {
 
 export class AmbiguousId extends Error {
   constructor(public partial: string, public matches: string[]) {
-    super(`"${partial}" casa com ${matches.length}: ${matches.join(', ')}`);
+    super(`"${partial}" matches ${matches.length}: ${matches.join(', ')}`);
   }
 }
 
@@ -242,13 +242,13 @@ export function posts(d: Doc): Post[] {
   return out.map((p) => ({ ...p, text: p.text.trim() }));
 }
 
-export type ThreadState = 'aberta' | 'concluida' | 'estourada';
+export type ThreadState = 'open' | 'concluded' | 'exhausted';
 
 export function threadState(d: Doc): { state: ThreadState; turn: number; budget: number } {
   const ps = posts(d);
   const budget = d.budget ?? 6;
   const turn = ps.length;
-  if (ps.some((p) => p.concluded)) return { state: 'concluida', turn, budget };
-  if (turn >= budget) return { state: 'estourada', turn, budget };
-  return { state: 'aberta', turn, budget };
+  if (ps.some((p) => p.concluded)) return { state: 'concluded', turn, budget };
+  if (turn >= budget) return { state: 'exhausted', turn, budget };
+  return { state: 'open', turn, budget };
 }

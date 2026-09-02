@@ -1,5 +1,6 @@
 import { Grid } from '../tui/grid.ts';
 import { C, G, fit } from '../tui/theme.ts';
+import { t } from '../i18n.ts';
 
 /** Rodapé de teclas. Corta em vez de atropelar a borda; status só entra se sobrar espaço. */
 export function keybar(
@@ -26,7 +27,7 @@ export function keybar(
 export function scrollHint(g: Grid, y: number, above: number, below: number) {
   if (above > 0) g.put(g.W - 4, y, '▲', C.linkDim);
   if (below > 0) {
-    const t = `▼ mais ${below}`;
-    g.put(g.W - 2 - t.length, y, t, C.linkDim);
+    const m = t('▼ {0} more', below);
+    g.put(g.W - 2 - m.length, y, m, C.linkDim);
   }
 }

@@ -9,7 +9,7 @@ postgres    812 saraiva    8u  IPv6 0xabcdef1234567891      0t0  TCP [::1]:5432 
 bun       50022 saraiva   14u  IPv4 0x00000000deadbeef      0t0  TCP 127.0.0.1:8787 (LISTEN)
 `;
 const r = parseLsof(canned);
-must('três serviços, sem duplicar a porta do postgres', r.length === 3 && r.filter((x) => x.pid === 812).length === 1);
+must('três services, sem duplicar a porta do postgres', r.length === 3 && r.filter((x) => x.pid === 812).length === 1);
 must('porta e comando certos', r.find((x) => x.port === 3000)?.command === 'node');
 must('endereço do postgres', r.find((x) => x.port === 5432)?.addr === '127.0.0.1');
 must('ordenado por porta', r.map((x) => x.port).join(',') === '3000,5432,8787');

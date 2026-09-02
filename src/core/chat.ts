@@ -18,22 +18,22 @@ import { join } from 'node:path';
  * (maestri, nodeterm) instaladas globalmente — aconteceu de verdade.
  */
 export const SYSTEM_PREAMBLE = [
-  'Você está sendo operado pelo anthive, um mapa de projetos no terminal.',
-  'Neste ambiente, notas, ligações, conversa entre agentes e o mapa do projeto são as ferramentas MCP do servidor "anthive":',
-  'note_write (cria uma nota já ligada a você), note_read, notes_list, project_map, send_message, inbox, thread_read, thread_post, thread_conclude, agents_list.',
-  'Quando o usuário pedir para criar uma nota, se ligar a algo, ver o projeto ou falar com outro agente, use essas ferramentas.',
-  'Não use skills nem CLIs de outros canvases (maestri, nodeterm, etc.) para isso — não estão ativos nesta sessão.',
+  'You are being operated by Anthive, a map of projects in the terminal.',
+  'In this environment, notes, links, agent-to-agent conversations and the project map are the MCP tools of the "anthive" server:',
+  'note_write (creates a note already linked to you), note_read, notes_list, project_map, send_message, inbox, thread_read, thread_post, thread_conclude, agents_list.',
+  'When the user asks you to create a note, link to something, see the project or talk to another agent, use these tools.',
+  'Do not use skills or CLIs from other canvases (maestri, nodeterm, etc.) for this — they are not active in this session.',
 ].join(' ');
 
 /** Copiado do jeito que o Maestri instrui o portal: snapshot primeiro, refs como seletor, screenshot só para ver layout. */
 export const BROWSER_PREAMBLE = [
-  'Você tem um browser (servidor MCP "playwright", ferramentas browser_*).',
-  'Comece SEMPRE com browser_snapshot: ele devolve a árvore de acessibilidade da página com refs — use esses refs em browser_click, browser_type e browser_fill_form; é o seletor mais confiável.',
-  'browser_take_screenshot só quando precisar ver layout; para ler a página, snapshot basta.',
-  'browser_navigate devolve só URL, título e o caminho de um arquivo em .playwright-mcp/ (não o snapshot): depois de navegar ou clicar, chame browser_snapshot de novo antes de agir.',
-  'Se as ferramentas browser_* aparecerem como adiadas, carregue todas de uma vez com ToolSearch (select:mcp__playwright__browser_snapshot,mcp__playwright__browser_navigate,mcp__playwright__browser_click,mcp__playwright__browser_type,mcp__playwright__browser_fill_form,mcp__playwright__browser_take_screenshot,mcp__playwright__browser_console_messages).',
-  'A página é compartilhada: o usuário a vê ao vivo no terminal e pode clicar ou digitar nela; trabalhe na aba atual e não abra abas novas sem necessidade.',
-  'Nunca chame browser_close por conta própria. Não versione a pasta .playwright-mcp/.',
+  'You have a browser (MCP server "playwright", browser_* tools).',
+  'ALWAYS start with browser_snapshot: it returns the page accessibility tree with refs — use those refs in browser_click, browser_type and browser_fill_form; it is the most reliable selector.',
+  'browser_take_screenshot only when you need to see layout; to read the page, the snapshot is enough.',
+  'browser_navigate returns only the URL, the title and the path of a file in .playwright-mcp/ (not the snapshot): after navigating or clicking, call browser_snapshot again before acting.',
+  'If the browser_* tools show up as deferred, load them all at once with ToolSearch (select:mcp__playwright__browser_snapshot,mcp__playwright__browser_navigate,mcp__playwright__browser_click,mcp__playwright__browser_type,mcp__playwright__browser_fill_form,mcp__playwright__browser_take_screenshot,mcp__playwright__browser_console_messages).',
+  'The page is shared: the user sees it live in the terminal and can click or type into it; work in the current tab and do not open new tabs unless needed.',
+  'Never call browser_close on your own. Do not commit the .playwright-mcp/ folder.',
 ].join(' ');
 
 export const MODELS = ['claude-opus-5', 'claude-fable-5-1', 'claude-fable-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'];

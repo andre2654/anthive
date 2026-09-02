@@ -17,6 +17,7 @@ import { Session, Ev, listSessions, sessionById, parseSession } from './sessions
 import { Task, tasksOfSession } from './tasks.ts';
 import { SYSTEM_PREAMBLE, BROWSER_PREAMBLE } from './chat.ts';
 import { BrowserMode, freePort, isUp, pages, pickPage, findChrome, launchChrome, waitUp, closeChrome as cdpClose } from './cdp.ts';
+import { t } from '../i18n.ts';
 
 export interface Project { id: string; name: string; cwd: string; created: number }
 
@@ -175,7 +176,7 @@ export const hasClaudeMd = async (cwd: string) => (await contextFiles(cwd)).some
  * turno de um agente, o barramento do anthive entra ali. Só acrescenta a
  * entrada `anthive`; o que já existir no arquivo fica como está.
  */
-export async function ensureBus(cwd: string): Promise<'novo' | 'atualizado' | 'já estava'> {
+export async function ensureBus(cwd: string): Promise<'new' | 'updated' | 'unchanged'> {
   const file = join(cwd, '.mcp.json');
   const compiled = import.meta.dir.startsWith('/$bunfs');
   const entry = { command: process.execPath, args: compiled ? ['mcp'] : [resolve(import.meta.dir, '..', 'index.ts'), 'mcp'], env: { ANTHIVE_HOME: ROOT } };
@@ -184,16 +185,16 @@ export async function ensureBus(cwd: string): Promise<'novo' | 'atualizado' | 'j
   const had = cfg !== null;
   cfg ??= {}; cfg.mcpServers ??= {};
   const cur = cfg.mcpServers.anthive;
-  if (cur && cur.command === entry.command && JSON.stringify(cur.args) === JSON.stringify(entry.args)) return 'já estava';
+  if (cur && cur.command === entry.command && JSON.stringify(cur.args) === JSON.stringify(entry.args)) return 'unchanged';
   cfg.mcpServers.anthive = entry;
   delete cfg.mcpServers.terminai;   // the bus's old name, from before the rename
   await writeFile(file, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
-  return had ? 'atualizado' : 'novo';
+  return had ? 'updated' : 'new';
 }
 
 // ---------------------------------------------------------------- browser
 /** O servidor Playwright MCP no .mcp.json do diretório — o agente ligado ao browser recebe as ferramentas browser_*. */
-export async function ensureBrowserServer(cwd: string, port: number): Promise<'novo' | 'atualizado' | 'já estava'> {
+export async function ensureBrowserServer(cwd: string, port: number): Promise<'new' | 'updated' | 'unchanged'> {
   const file = join(cwd, '.mcp.json');
   // o Playwright grava snapshots e screenshots em .playwright-mcp/ dentro do cwd: fica fora do git sem mexer no .gitignore do projeto
   try {
@@ -207,10 +208,10 @@ export async function ensureBrowserServer(cwd: string, port: number): Promise<'n
   const had = cfg !== null;
   cfg ??= {}; cfg.mcpServers ??= {};
   const cur = cfg.mcpServers.playwright;
-  if (cur && JSON.stringify(cur.args) === JSON.stringify(entry.args)) return 'já estava';
+  if (cur && JSON.stringify(cur.args) === JSON.stringify(entry.args)) return 'unchanged';
   cfg.mcpServers.playwright = entry;
   await writeFile(file, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
-  return had ? 'atualizado' : 'novo';
+  return had ? 'updated' : 'new';
 }
 
 export async function addBrowser(p: Project, mode: BrowserMode): Promise<BrowserItem> {
@@ -228,20 +229,24 @@ export async function addBrowser(p: Project, mode: BrowserMode): Promise<Browser
 }
 
 /** Item antigo (só `headless`) ganha modo e porta. */
-export async function settleBrowser(it: BrowserItem) {
-  if (!it.mode) it.mode = 'oculto';   // item de antes da troca: começa oculto, que é o padrão; `o` abre a janela
+export async function settleBrowser(it: BrowserItem): Promise<boolean> {
+  const before = `${it.mode}:${it.port}`;
+  const m = it.mode as string;
+  if (!it.mode || m === 'oculto') it.mode = 'hidden';   // items from before the rename (or with no mode) start hidden; `o` opens the window
+  else if (m === 'janela') it.mode = 'window';
   if (!it.port) it.port = await freePort();
+  return before !== `${it.mode}:${it.port}`;
 }
 export const browserProfile = (it: BrowserItem) => join(ROOT, 'browsers', it.id);
 
 /** Sobe o Chrome deste browser se não estiver de pé. */
-export async function ensureBrowserUp(it: BrowserItem): Promise<'já estava' | 'subiu'> {
-  if (await isUp(it.port)) return 'já estava';
+export async function ensureBrowserUp(it: BrowserItem): Promise<'was up' | 'started'> {
+  if (await isUp(it.port)) return 'was up';
   const chrome = await findChrome();
-  if (!chrome) throw new Error('nenhum Chrome nesta máquina (Google Chrome, ou `npx playwright install chromium`)');
+  if (!chrome) throw new Error(t('no Chrome on this machine (Google Chrome, or `npx playwright install chromium`)'));
   await launchChrome(chrome, browserProfile(it), it.port, it.mode);
-  if (!(await waitUp(it.port))) throw new Error(`${chrome.name} não respondeu na porta ${it.port}`);
-  return 'subiu';
+  if (!(await waitUp(it.port))) throw new Error(t('{0} did not answer on port {1}', chrome.name, it.port));
+  return 'started';
 }
 /** Troca oculto ⇄ janela: fecha, grava, sobe de novo com o mesmo perfil (o Playwright do agente reconecta sozinho). */
 export async function setBrowserMode(pid: string, it: BrowserItem, mode: BrowserMode) {
@@ -282,7 +287,7 @@ async function makeWorktree(repo: string, branch: string): Promise<string> {
   try { await access(path); return path; } catch {}
   let r = await sh(['git', 'worktree', 'add', '-b', branch, path], root);
   if (!r.ok) r = await sh(['git', 'worktree', 'add', path, branch], root);
-  if (!r.ok) throw new Error(`git worktree falhou: ${r.out.split('\n')[0]}`);
+  if (!r.ok) throw new Error(t('git worktree failed: {0}', r.out.split('\n')[0] ?? ''));
   return path;
 }
 
@@ -293,10 +298,10 @@ async function makeWorktree(repo: string, branch: string): Promise<string> {
 export async function addAgent(p: Project, name: string, opts: { worktree?: string } = {}): Promise<AgentItem> {
   const g = await loadGraph(p.id);
   const nm = slugify(name, 24);
-  if (g.items.some((i) => i.kind === 'agent' && i.name === nm)) throw new Error(`já existe um agente "${nm}" neste projeto`);
+  if (g.items.some((i) => i.kind === 'agent' && i.name === nm)) throw new Error(t('an agent named "{0}" already exists in this project', nm));
   let cwd = p.cwd, worktree: string | null = null;
   if (opts.worktree) {
-    if (!(await isRepo(p.cwd))) throw new Error(`${projectName(p.cwd)} não é um repositório git — sem worktree o agente usa o diretório direto`);
+    if (!(await isRepo(p.cwd))) throw new Error(t('{0} is not a git repository — without a worktree the agent uses the directory directly', projectName(p.cwd)));
     cwd = await makeWorktree(p.cwd, opts.worktree); worktree = opts.worktree;
   }
   const it: AgentItem = { kind: 'agent', id: `a-${uid()}`, name: nm, cwd, sessionId: crypto.randomUUID(), worktree, created: Date.now() };
@@ -391,7 +396,7 @@ export async function view(p: Project): Promise<View> {
       const evs = await parseSession(a.session!.path);
       Object.assign(st, browserStateFrom(evs, st));
     }
-    if (!it.port || !it.mode) { await settleBrowser(it); await saveGraph(p.id, g); }
+    if (await settleBrowser(it)) await saveGraph(p.id, g);
     // com o Chrome de pé, url e título vêm dele, ao vivo; o resto (snapshot, última ferramenta) segue vindo do transcript
     const livePage = pickPage(await pages(it.port));
     if (livePage) { st.live = true; st.url = livePage.url; st.title = livePage.title; }
@@ -442,32 +447,32 @@ export function buildBriefing(v: View, agentName: string, prompt: string): strin
   const nameOf = (id: string) => { const n = v.nodes.find((x) => x.id === id); return !n ? id : n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.item.name; };
   const ctx = files.filter((f) => f.item.context);
   const ctxLine = ctx.length
-    ? `Contexto de ambiente: ${ctx.map((f) => `${f.item.label} (${f.lines ?? '?'} linhas)`).join(' e ')} — leia primeiro; é o que descreve como este projeto roda, testa e se organiza.`
-    : 'Este projeto não tinha CLAUDE.md: um foi gerado pelo /init na sua sessão agora. Leia-o antes de qualquer coisa; se estiver incompleto, complete-o — ele fica ligado a você e a todo agente daqui.';
+    ? `Environment context: ${ctx.map((f) => `${f.item.label} (${f.lines ?? '?'} lines)`).join(' and ')} — read it first; it describes how this project runs, tests and is organized.`
+    : 'This project had no CLAUDE.md: one was just generated by /init in your session. Read it before anything else; if it is incomplete, complete it — it stays linked to you and to every agent here.';
   const lines: string[] = [
-    `Você é o agente "${agentName}" do projeto "${v.project.name}", em ${v.project.cwd.replace(home, '~')}.`,
+    `You are agent "${agentName}" of project "${v.project.name}", in ${v.project.cwd.replace(home, '~')}.`,
     ctxLine,
-    'O projeto tem hoje:',
-    ...(agents.length ? [`- agentes: ${agents.map((a) => `${a.name} (${a.session ? a.session.state : 'sem sessão'}${a.item?.worktree ? `, ${a.item.worktree}` : ''})`).join('; ')}`] : ['- agentes: nenhum além de você']),
-    ...(notes.length ? [`- notas: ${notes.map((n) => `${n.doc.title} (${n.doc.ttl ? 'efêmera' : 'persistente'}${n.doc.acl.length ? `; lê: ${n.doc.acl.join(', ')}` : ''})`).join('; ')}`] : ['- notas: nenhuma']),
-    ...(files.filter((f) => !f.item.context).length ? [`- arquivos: ${files.filter((f) => !f.item.context).map((f) => f.item.path.replace(home, '~')).join('; ')}`] : ['- arquivos: nenhum além do contexto']),
-    ...(svcs.length ? [`- serviços vivos nesta máquina: ${svcs.map((s) => `${s.item.name}${s.item.port ? ` na porta ${s.item.port}` : ''} (pid ${s.item.pid}${s.alive ? '' : ', morto'})`).join('; ')}`] : ['- serviços: nenhum']),
-    ...(v.edges.length ? [`Relações atuais: ${v.edges.map((e) => `${nameOf(e.from)} ${e.kind === 'talk' ? '⇄' : '→'} ${nameOf(e.to)}${e.thread?.goal ? ` ("${e.thread.goal}")` : ''}`).join('; ')}.`] : ['Relações atuais: nenhuma.']),
-    'Como usar as relações: notas se leem com a ferramenta note_read do barramento anthive (MCP) depois de ligadas a você; para falar com outro agente use send_message com um objetivo claro; arquivos ligados estão nos caminhos acima; serviços são processos vivos nas portas indicadas.',
-    'Antes de qualquer coisa, decida com o que vale a pena se ligar para ter contexto. Responda PRIMEIRO com uma única linha exatamente neste formato:',
-    'ligar: nome1, nome2',
-    '(use os nomes acima; escreva "ligar: nada" se nada fizer sentido). Só depois trate o pedido.',
+    'The project currently has:',
+    ...(agents.length ? [`- agents: ${agents.map((a) => `${a.name} (${a.session ? a.session.state : 'no session'}${a.item?.worktree ? `, ${a.item.worktree}` : ''})`).join('; ')}`] : ['- agents: none besides you']),
+    ...(notes.length ? [`- notes: ${notes.map((n) => `${n.doc.title} (${n.doc.ttl ? 'ephemeral' : 'persistent'}${n.doc.acl.length ? `; read by: ${n.doc.acl.join(', ')}` : ''})`).join('; ')}`] : ['- notes: none']),
+    ...(files.filter((f) => !f.item.context).length ? [`- files: ${files.filter((f) => !f.item.context).map((f) => f.item.path.replace(home, '~')).join('; ')}`] : ['- files: none besides the context']),
+    ...(svcs.length ? [`- live services on this machine: ${svcs.map((s) => `${s.item.name}${s.item.port ? ` on port ${s.item.port}` : ''} (pid ${s.item.pid}${s.alive ? '' : ', dead'})`).join('; ')}`] : ['- services: none']),
+    ...(v.edges.length ? [`Current relations: ${v.edges.map((e) => `${nameOf(e.from)} ${e.kind === 'talk' ? '⇄' : '→'} ${nameOf(e.to)}${e.thread?.goal ? ` ("${e.thread.goal}")` : ''}`).join('; ')}.`] : ['Current relations: none.']),
+    'How to use the relations: notes are read with the note_read tool of the anthive bus (MCP) once linked to you; to talk to another agent use send_message with a clear goal; linked files are at the paths above; services are live processes on the ports listed.',
+    'Before anything else, decide what is worth linking to for context. Reply FIRST with a single line in exactly this format:',
+    'link: name1, name2',
+    '(use the names above; write "link: nothing" if nothing makes sense). Only then handle the request.',
     '',
-    `Pedido: ${prompt}`,
+    `Request: ${prompt}`,
   ];
   return lines.join('\n');
 }
 
 /** Lê "ligar: a, b" da resposta e devolve os ids dos nós que batem. */
 export function parseBriefingReply(v: View, text: string): string[] {
-  const m = /^\s*ligar:\s*(.+)$/im.exec(text);
+  const m = /^\s*(?:link|ligar):\s*(.+)$/im.exec(text);   // `ligar:` is the old (Portuguese) form, still accepted
   if (!m) return [];
-  const wanted = m[1]!.split(/[,;]/).map((s) => s.trim().toLowerCase()).filter((s) => s && s !== 'nada');
+  const wanted = m[1]!.split(/[,;]/).map((s) => s.trim().toLowerCase()).filter((s) => s && s !== 'nothing' && s !== 'none' && s !== 'nada');
   const ids: string[] = [];
   for (const n of v.nodes) {
     if (n.kind === 'task') continue;
@@ -507,7 +512,7 @@ export function browserStateFrom(evs: Ev[], base: BrowserState): BrowserState {
     if (mUrl) st.url = mUrl[1]!;
     if (mTitle) st.title = mTitle[1]!.trim();
     const mC = /Console:\s*(\d+) errors?,\s*(\d+) warnings?/i.exec(text);
-    if (mC) st.counts = `${mC[1]} erro${mC[1] === '1' ? '' : 's'} · ${mC[2]} aviso${mC[2] === '1' ? '' : 's'}`;
+    if (mC) st.counts = t('{0} errors · {1} warnings', mC[1]!, mC[2]!);
     if (tool === 'browser_snapshot' && text) st.snapshot = text;
     if (tool === 'browser_console_messages' && text) st.console = text;
     if (tool === 'browser_take_screenshot' && res?.image) st.image = res.image;

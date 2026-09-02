@@ -6,6 +6,7 @@ import { Grid, Rect } from '../tui/grid.ts';
 import { C, G, BG, ago, pad, padStart, fit, sparkline } from '../tui/theme.ts';
 import { ProjectCard } from '../core/project.ts';
 import { keybar, scrollHint } from './chrome.ts';
+import { t } from '../i18n.ts';
 
 export const CARD_H = 5;
 
@@ -34,26 +35,26 @@ function card(g: Grid, c: ProjectCard, r: Rect, on: boolean) {
   if (on) g.fill(r, BG.sel);
   g.frame(r, c.project.name, on ? C.link : c.registered ? C.inkHi : C.ink, on ? C.link : C.frame);
   const live = c.running > 0;
-  const l1 = live ? `${G.running} ${c.running} rodando` : c.sessions.length ? `${G.idle} ${c.sessions.length} sess${c.sessions.length === 1 ? 'ão' : 'ões'}` : `${G.idle} sem sessão`;
+  const l1 = live ? `${G.running} ${t('{0} running', c.running)}` : c.sessions.length ? `${G.idle} ${c.sessions.length === 1 ? t('1 session') : t('{0} sessions', c.sessions.length)}` : `${G.idle} ${t('no session')}`;
   g.put(r.x + 2, r.y + 1, pad(l1, inner - 7), live ? C.run : C.dim);
   g.put(r.x + 2 + inner - 7, r.y + 1, padStart(c.sessions.length ? ago(c.lastMs) : '', 7), C.frame);
   const home = process.env.HOME ?? '';
   g.put(r.x + 2, r.y + 2, pad(c.project.cwd.replace(home, '~'), inner), C.frame);
   const spark = c.sessions.flatMap((s) => s.spark).slice(-inner);
-  g.put(r.x + 2, r.y + 3, spark.length ? sparkline(spark, inner) : pad(c.registered ? 'registrado' : 'descoberto pelas sessões', inner), spark.length ? (live ? C.sparkR : C.sparkI) : C.frame);
+  g.put(r.x + 2, r.y + 3, spark.length ? sparkline(spark, inner) : pad(c.registered ? t('registered') : t('discovered from sessions'), inner), spark.length ? (live ? C.sparkR : C.sparkI) : C.frame);
 }
 
 function newCard(g: Grid, r: Rect, on: boolean) {
   if (on) g.fill(r, BG.sel);
   g.frame(r, '', C.frame, on ? C.link : C.frame);
-  const t = '+ Novo';
-  g.put(r.x + Math.floor((r.w - t.length) / 2), r.y + 2, t, on ? C.link : C.dim);
+  const label = t('+ New');
+  g.put(r.x + Math.floor((r.w - label.length) / 2), r.y + 2, label, on ? C.link : C.dim);
 }
 
 export function renderHome(g: Grid, cards: ProjectCard[], selected: string, scroll: number, status: string) {
   const { W, H } = g;
   g.frame({ x: 0, y: 0, w: W, h: H }, 'anthive', C.inkHi);
-  const right = ` ${cards.length} projeto${cards.length === 1 ? '' : 's'} `;
+  const right = ` ${cards.length === 1 ? t('1 project') : t('{0} projects', cards.length)} `;
   g.put(W - 2 - right.length, 0, right, C.dim);
 
   const L = layoutHome(cards.length, W, scroll);
@@ -66,5 +67,5 @@ export function renderHome(g: Grid, cards: ProjectCard[], selected: string, scro
   }
   g.put(0, H - 3, G.teeL + G.h.repeat(W - 2) + G.teeR, C.frame);
   scrollHint(g, H - 3, L.rects.filter((r) => r.rect.y < top).length, L.rects.filter((r) => r.rect.y + r.rect.h - 1 > bottom).length);
-  keybar(g, H - 2, [['↑↓←→', 'selecionar'], ['↵', 'entrar'], ['n', 'novo projeto'], ['q', 'sair']], status);
+  keybar(g, H - 2, [['↑↓←→', t('select')], ['↵', t('open')], ['n', t('new project')], ['q', t('quit')]], status);
 }

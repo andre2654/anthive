@@ -9,7 +9,7 @@ const must = (l: string, c: boolean) => { console.log(c ? `✓ ${l}` : `✗ ${l}
 const chrome = await findChrome(); if (!chrome) { console.log('sem chrome'); process.exit(1); }
 const port = await freePort(), profile = mkdtempSync(join(tmpdir(), 'tai-chrome-'));
 const t0 = Date.now();
-await launchChrome(chrome, profile, port, 'oculto');
+await launchChrome(chrome, profile, port, 'hidden');
 must('sobe oculto em menos de 12 s', await waitUp(port));
 console.log(`  ${chrome.name} em ${Date.now() - t0} ms, porta ${port}`);
 let changes = 0; const live = new LiveView(port, () => changes++);

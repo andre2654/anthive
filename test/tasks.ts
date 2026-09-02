@@ -10,7 +10,7 @@ const ts = tasksFrom([
   ev('TaskUpdate', { taskId: '2', status: 'completed' }),
   ev('TaskUpdate', { taskId: '9', status: 'completed' }),
 ]);
-must('duas tarefas, ids sequenciais', ts.length === 2 && ts[0]!.id === '1' && ts[1]!.id === '2');
+must('duas tasks, ids sequenciais', ts.length === 2 && ts[0]!.id === '1' && ts[1]!.id === '2');
 must('estado atualizado pelo TaskUpdate', ts[0]!.status === 'in_progress' && ts[1]!.status === 'completed');
 must('descrição e forma ativa preservadas', ts[0]!.description === 'remover ? final' && ts[0]!.active === 'Corrigindo ARBs');
 must('update de id inexistente é ignorado', ts.length === 2);

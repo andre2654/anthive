@@ -4,6 +4,7 @@
  * e reconecta sozinho se o Chrome cair ou for trocado de modo.
  */
 import { Cdp, CdpKey, CdpMsg, PageInfo, pickPage } from './cdp.ts';
+import { t } from '../i18n.ts';
 
 export interface Frame { data: string; w: number; h: number; at: number }   // w/h: viewport em px CSS (não o tamanho do PNG)
 
@@ -33,7 +34,7 @@ export class LiveView {
     try {
       const cdp = await Cdp.connect(this.port);
       this.cdp = cdp; this.error = '';
-      cdp.onClose = () => { if (this.stopped) return; this.cdp = null; this.sid = null; this.error = 'chrome caiu — tentando de novo'; this.onChange(); };
+      cdp.onClose = () => { if (this.stopped) return; this.cdp = null; this.sid = null; this.error = t('chrome went down — retrying'); this.onChange(); };
       cdp.on((m) => this.onEvent(m));
       await cdp.send('Target.setDiscoverTargets', { discover: true });
       await this.follow();

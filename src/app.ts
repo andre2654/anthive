@@ -10,16 +10,19 @@ import { isEditTool, hunksOf, renderDiff } from './tui/diff.ts';
 import { renderBrowser } from './views/item.ts';
 import { supportsKittyGraphics, placeImage, clearImages } from './tui/image.ts';
 import { LiveView } from './core/live.ts';
-import { BrowserMode, fitImage, toPage, inBox, MODE_LABEL } from './core/cdp.ts';
+import { BrowserMode, fitImage, toPage, inBox } from './core/cdp.ts';
+import { modeLabel } from './views/item.ts';
 import { renderAgent, rows, Row, INPUT_H, LinkChip, detailWidth, tasksFrom, PanelData, panelFits } from './views/agent.ts';
 import * as P from './core/project.ts';
 import * as store from './core/store.ts';
+import { ROOT } from './core/store.ts';
 import * as bus from './core/bus.ts';
 import * as svc from './core/services.ts';
 import { Session, Ev, parseSession, windowOf } from './core/sessions.ts';
 import { ChatSession, ChatEvent, MODELS, EFFORTS, PERMISSIONS } from './core/chat.ts';
-import { readFile, unlink } from 'node:fs/promises';
-import { basename } from 'node:path';
+import { readFile, writeFile, unlink, mkdir } from 'node:fs/promises';
+import { basename, join } from 'node:path';
+import { t } from './i18n.ts';
 
 type ViewName = 'home' | 'project' | 'agent' | 'note' | 'file' | 'service' | 'task' | 'diff' | 'browser';
 type Modal =
@@ -94,7 +97,7 @@ export class App {
       if (!reply) continue;
       for (const id of P.parseBriefingReply(this.pv, reply)) await this.connect(node.id, id, 'contexto');
       delete (it as any).briefingPending; changed = true;
-      this.say(`${node.name} se ligou ao que fazia sentido`, 5000);
+      this.say(t('{0} linked to what made sense', node.name), 5000);
     }
     if (changed) { await P.saveGraph(this.project.id, g); this.pv = await P.view(this.project); }
   }
@@ -147,15 +150,15 @@ export class App {
   newProject() {
     this.modal = {
       kind: 'form',
-      note: 'o diretório é criado se não existir',
-      form: new Form('novo projeto', [
-        { label: 'nome', required: true, hint: 'como você chama' },
-        { label: 'diretório', hint: '~/Documents/<nome>' },
+      note: t('the directory is created if missing'),
+      form: new Form(t('new project'), [
+        { label: t('name'), required: true, hint: t('what you call it') },
+        { label: t('directory'), hint: t('~/Documents/<name>') },
       ]),
       submit: async ([name, dir]) => {
         const p = await P.createProject(name!, dir || `~/Documents/${store.slugify(name!, 32)}`);
         await this.openProject(p);
-        return `${p.name} criado em ${p.cwd.replace(process.env.HOME ?? '', '~')}`;
+        return t('{0} created in {1}', p.name, p.cwd.replace(process.env.HOME ?? '', '~'));
       },
     };
     this.dirty = true;
@@ -184,12 +187,27 @@ export class App {
     this.dirty = true;
   }
 
+  /** Anthive writes into the user's repos (.mcp.json, .git/info/exclude): ask once, remember in ~/.anthive/settings.json. */
+  consentOk = !!process.env.ANTHIVE_YES;
+  async loadConsent() { try { this.consentOk ||= !!JSON.parse(await readFile(join(ROOT, 'settings.json'), 'utf8')).mcpConsent; } catch {} }
+  async grantConsent() { this.consentOk = true; await mkdir(ROOT, { recursive: true }); await writeFile(join(ROOT, 'settings.json'), JSON.stringify({ mcpConsent: true }, null, 2) + '\n', 'utf8'); }
+  /** Runs the action now, or after a one-time confirmation modal. */
+  async withConsent(action: () => Promise<string | void>): Promise<string | void> {
+    if (this.consentOk) return action();
+    this.modal = { kind: 'confirm', title: t('let Anthive write .mcp.json in your projects?'), lines: [
+      t('Claude Code loads MCP servers from <project>/.mcp.json. Anthive registers its agent bus there,'),
+      t('and the browser when you add one; it also lists .playwright-mcp/ in .git/info/exclude.'),
+      t('Nothing else in the repo is touched. You are asked once; the answer is kept in ~/.anthive/settings.json.'),
+    ], ok: async () => { await this.grantConsent(); return (await action()) ?? ''; } };
+    this.dirty = true;
+  }
+
   /** Sobe o Chrome se preciso e liga a página ao vivo. */
   async openLive(it: P.BrowserItem) {
     this.page?.stop(); this.page = null; this.imgKey = '';
-    this.booting = 'subindo o Chrome…'; this.dirty = true;
-    try { const r = await P.ensureBrowserUp(it); this.booting = ''; if (r === 'subiu') this.say(`chrome ${MODE_LABEL[it.mode]} subiu`, 3000); }
-    catch (e) { this.booting = ''; this.say(`chrome não subiu: ${(e as Error).message}`, 7000); this.dirty = true; return; }
+    this.booting = t('starting Chrome…'); this.dirty = true;
+    try { const r = await P.ensureBrowserUp(it); this.booting = ''; if (r === 'started') this.say(t('chrome ({0}) is up', modeLabel(it.mode)), 3000); }
+    catch (e) { this.booting = ''; this.say(t('chrome did not start: {0}', (e as Error).message), 7000); this.dirty = true; return; }
     if (this.view !== 'browser') return;
     this.page = new LiveView(it.port, () => { this.dirty = true; });
     await this.page.start();
@@ -200,27 +218,27 @@ export class App {
   /** oculto ⇄ janela, com o mesmo perfil; o agente reconecta sozinho. */
   async toggleBrowserMode() {
     const b = this.browser; if (!b || !this.project) return;
-    const mode: BrowserMode = b.item.mode === 'oculto' ? 'janela' : 'oculto';
+    const mode: BrowserMode = b.item.mode === 'hidden' ? 'window' : 'hidden';
     this.page?.stop(); this.page = null; this.wipeImages(); this.imgKey = '';
-    this.booting = mode === 'janela' ? 'abrindo o Chrome na tela…' : 'ocultando o Chrome…'; this.dirty = true;
+    this.booting = mode === 'window' ? t('opening Chrome on screen…') : t('hiding Chrome…'); this.dirty = true;
     try { await P.setBrowserMode(this.project.id, b.item, mode); await this.load(); }
-    catch (e) { this.booting = ''; this.say(`não troquei o modo: ${(e as Error).message}`, 7000); this.dirty = true; return; }
+    catch (e) { this.booting = ''; this.say(t('could not switch mode: {0}', (e as Error).message), 7000); this.dirty = true; return; }
     this.booting = '';
     const fresh = this.pv?.nodes.find((n): n is P.BrowserNode => n.kind === 'browser' && n.id === b.id); if (fresh) this.browser = fresh;
-    this.say(mode === 'janela' ? 'o Chrome está na tela, sem roubar o foco; o agente reconecta sozinho' : 'o Chrome saiu da tela e do Dock; continua aqui ao vivo', 6000);
+    this.say(mode === 'window' ? t('Chrome is on screen without stealing focus; the agent reconnects by itself') : t('Chrome left the screen and the Dock; it stays live here'), 6000);
     if (this.view === 'browser') { this.page = new LiveView(b.item.port, () => { this.dirty = true; }); await this.page.start(); }
   }
 
   pickKind() {
     const agentSel = this.node(this.sel)?.kind === 'agent';
     this.modal = {
-      kind: 'pick', title: 'novo', index: 0, items: [
-        { value: 'agent', label: `${KIND_GLYPH.agent} agente`, hint: 'sessão nomeada, recebe o mapa do projeto' },
-        { value: 'note', label: `${KIND_GLYPH.note} nota`, hint: agentSel ? 'já ligada ao agente selecionado' : 'texto numa linha; @2h = efêmera' },
-        { value: 'file', label: `${KIND_GLYPH.file} arquivo`, hint: 'caminho no projeto ou absoluto' },
-        { value: 'service', label: `${KIND_GLYPH.service} serviço`, hint: 'o que está escutando porta nesta máquina' },
-        { value: 'browser', label: `${KIND_GLYPH.browser} browser`, hint: 'Chrome pelo Playwright; o agente ligado ganha browser_*' },
-        { value: 'context', label: `${KIND_GLYPH.file} contexto`, hint: 'CLAUDE.md do projeto — abre, ou gera com o /init do Claude' },
+      kind: 'pick', title: t('new'), index: 0, items: [
+        { value: 'agent', label: `${KIND_GLYPH.agent} ${t('agent')}`, hint: t('a named session that receives the project map') },
+        { value: 'note', label: `${KIND_GLYPH.note} ${t('note')}`, hint: agentSel ? t('already linked to the selected agent') : t('one line of text; @2h = ephemeral') },
+        { value: 'file', label: `${KIND_GLYPH.file} ${t('file')}`, hint: t('path in the project, or absolute') },
+        { value: 'service', label: `${KIND_GLYPH.service} ${t('service')}`, hint: t('whatever is listening on a port on this machine') },
+        { value: 'browser', label: `${KIND_GLYPH.browser} browser`, hint: t('a Chrome of its own; the linked agent gets browser_* tools') },
+        { value: 'context', label: `${KIND_GLYPH.file} ${t('context')}`, hint: t('the project CLAUDE.md — open it, or generate it with Claude /init') },
       ],
       submit: async (kind) => { if (kind === 'context') return this.contextAction(); await this.create(kind as P.ItemKind | 'browser'); return ''; },
     };
@@ -228,42 +246,43 @@ export class App {
   }
 
   async create(kind: P.ItemKind | 'browser') {
+    if ((kind === 'agent' || kind === 'browser') && !this.consentOk) { await this.withConsent(() => this.create(kind)); return; }
     if (kind === 'browser') {
       const p0 = this.project!;
-      this.modal = { kind: 'pick', title: 'browser', index: 0, note: 'o anthive sobe um Chrome só do projeto; o agente ligado (l) usa esse mesmo Chrome',
-        items: [{ value: 'oculto', label: 'oculto (recomendado)', hint: 'sem janela nem ícone no Dock — a página aparece ao vivo aqui, e você clica nela' }, { value: 'janela', label: 'janela', hint: 'o Chrome abre na tela sem roubar o foco; troca com o depois' }],
-        submit: async (v) => { const it = await P.addBrowser(p0, v as BrowserMode); await this.load(); this.sel = it.id; this.ensureVisible(); return 'browser no projeto — ligue um agente (l) e abra com ↵ para ver ao vivo'; } };
+      this.modal = { kind: 'pick', title: 'browser', index: 0, note: t('Anthive starts a Chrome just for this project; the linked agent (l) uses that same Chrome'),
+        items: [{ value: 'hidden', label: t('hidden (recommended)'), hint: t('no window, no Dock icon — the page shows live here, and you click it') }, { value: 'window', label: t('window'), hint: t('Chrome opens on screen without stealing focus; switch later with o') }],
+        submit: async (v) => { const it = await P.addBrowser(p0, v as BrowserMode); await this.load(); this.sel = it.id; this.ensureVisible(); return t('browser added — link an agent (l) and press ↵ to watch it live'); } };
       this.dirty = true; return;
     }
     const p = this.project!, agentSel = this.node(this.sel);
     if (kind === 'agent') {
       this.modal = {
-        kind: 'form', note: 'com instrução, ele já começa — e antes decide com o que se ligar',
-        form: new Form('novo agente', [
-          { label: 'nome', required: true, hint: 'api, db, ui…' },
-          { label: 'worktree', hint: 'branch; vazio usa o diretório do projeto' },
-          { label: 'instrução', hint: 'opcional — o primeiro pedido' },
+        kind: 'form', note: t('with an instruction it starts right away — and first decides what to link to'),
+        form: new Form(t('new agent'), [
+          { label: t('name'), required: true, hint: 'api, db, ui…' },
+          { label: 'worktree', hint: t('branch; empty uses the project directory') },
+          { label: t('instruction'), hint: t('optional — the first request') },
         ]),
         submit: async ([name, wt, prompt]) => {
           const it = await P.addAgent(p, name!, { worktree: wt || undefined });
           const bus = await P.ensureBus(it.cwd);
-          if (bus !== 'já estava') this.say(`barramento ${bus} em ${it.cwd.replace(process.env.HOME ?? '', '~')}/.mcp.json`, 5000);
+          if (bus !== 'unchanged') this.say(t('bus {0} in {1}/.mcp.json', bus === 'new' ? t('new') : t('updated'), it.cwd.replace(process.env.HOME ?? '', '~')), 5000);
           if (prompt) {
             const briefing = P.buildBriefing(this.pv!, it.name, prompt);
             await P.firstTurn(it, briefing);
             const g = await P.loadGraph(p.id); const stored = g.items.find((x) => x.id === it.id); if (stored) { (stored as any).briefingPending = true; await P.saveGraph(p.id, g); }
           }
           await this.load(); this.sel = it.id; this.ensureVisible();
-          return prompt ? `${it.name} nasceu e já está lendo o projeto` : `${it.name} nasceu — ↵ abre o chat`;
+          return prompt ? t('{0} is born and already reading the project', it.name) : t('{0} is born — ↵ opens the chat', it.name);
         },
       };
     } else if (kind === 'note') {
       const to = agentSel?.kind === 'agent' ? agentSel.name : null;
       this.inline = {
-        label: to ? `${G.note} nota ${G.arrow} ${to}` : `${G.note} nota`, input: new TextInput(),
+        label: to ? `${G.note} ${t('note')} ${G.arrow} ${to}` : `${G.note} ${t('note')}`, input: new TextInput(),
         submit: async (raw) => {
           const m = /\s@(\d+[smhd])\s*$/.exec(raw); const text = (m ? raw.slice(0, m.index) : raw).trim();
-          if (!text) throw new Error('nota vazia');
+          if (!text) throw new Error(t('empty note'));
           const d = await store.create({ kind: 'note', title: text.split('\n')[0]!.slice(0, 48), body: `${text}\n`, acl: to ? [to] : [], ttl: store.parseTTL(m?.[1]), project: p.id });
           await this.load(); this.sel = `note-${d.id}`; this.ensureVisible();
           return `${store.uri(d)}${to ? ` ligada a ${to}` : ''}`;
@@ -271,21 +290,21 @@ export class App {
       };
     } else if (kind === 'file') {
       this.inline = {
-        label: `${KIND_GLYPH.file} arquivo`, input: new TextInput(),
+        label: `${KIND_GLYPH.file} ${t('file')}`, input: new TextInput(),
         submit: async (raw) => {
           const rel = raw.trim(); if (!rel) throw new Error('caminho vazio');
           const abs = rel.startsWith('/') || rel.startsWith('~') ? rel : `${p.cwd}/${rel}`;
-          const it = await P.addFile(p.id, abs).catch(() => { throw new Error(`não achei ${rel}`); });
+          const it = await P.addFile(p.id, abs).catch(() => { throw new Error(t('could not find {0}', rel)); });
           if (agentSel?.kind === 'agent') await P.link(p.id, agentSel.id, it.id);
           await this.load(); this.sel = it.id; this.ensureVisible();
-          return `${it.label} no projeto${agentSel?.kind === 'agent' ? `, ligado a ${agentSel.name}` : ''}`;
+          return `${t('{0} added to the project', it.label)}${agentSel?.kind === 'agent' ? `, ${t('linked to {0}', agentSel.name)}` : ''}`;
         },
       };
     } else {
       const found = await svc.discover();
-      if (!found.length) { this.say('nada escutando porta nesta máquina agora'); return; }
+      if (!found.length) { this.say(t('nothing listening on a port on this machine right now')); return; }
       this.modal = {
-        kind: 'pick', title: 'serviço escutando', index: 0, note: 'só o que está vivo nesta máquina, pelo lsof',
+        kind: 'pick', title: t('listening service'), index: 0, note: t('only what is alive on this machine, via lsof'),
         items: found.map((f) => ({ value: String(f.pid) + ':' + f.port, label: `${f.command} :${f.port}`, hint: `pid ${f.pid}  ${f.addr}` })),
         submit: async (v) => {
           const [pid, port] = v.split(':').map(Number);
@@ -293,7 +312,7 @@ export class App {
           const it = await P.addService(p.id, { name: f.command, pid: f.pid, port: f.port, command: f.command, cwd: await svc.cwdOf(f.pid) });
           if (agentSel?.kind === 'agent') await P.link(p.id, agentSel.id, it.id);
           await this.load(); this.sel = it.id; this.ensureVisible();
-          return `${it.name}:${it.port} no projeto`;
+          return t('{0} added to the project', `${it.name}:${it.port}`);
         },
       };
     }
@@ -306,29 +325,29 @@ export class App {
     const node = this.pv?.nodes.find((n): n is P.FileNode => n.kind === 'file' && n.item.context === 'claude');
     if (node) { this.sel = node.id; await this.openSel(); return ''; }
     P.generateClaudeMd(p.cwd);
-    return 'gerando CLAUDE.md com o /init — aparece no mapa quando terminar';
+    return t('generating CLAUDE.md with /init — it shows on the map when done');
   }
 
   /** Ligar tem semântica pelo par: agente⇄agente conversa; agente→nota é leitura; o resto é associação. */
   async connect(aId: string, bId: string, goal?: string): Promise<string> {
-    const a = this.node(aId), b = this.node(bId); if (!a || !b || !this.project) throw new Error('nó sumiu');
+    const a = this.node(aId), b = this.node(bId); if (!a || !b || !this.project) throw new Error(t('node vanished'));
     if (a.kind === 'agent' && b.kind === 'agent') {
       if (!goal) {
-        this.inline = { label: `${G.swap} ${a.name} ${G.swap} ${b.name} ${G.h} objetivo`, input: new TextInput(),
+        this.inline = { label: `${G.swap} ${a.name} ${G.swap} ${b.name} ${G.h} ${t('goal')}`, input: new TextInput(),
           submit: async (g) => { const d = await bus.link(a.name, b.name, g.trim()); await this.load(); return `${d.id} aberta`; } };
         this.dirty = true; return '';
       }
       await bus.link(a.name, b.name, goal); return `${a.name} ⇄ ${b.name}`;
     }
     const [ag, other] = a.kind === 'agent' ? [a, b] : b.kind === 'agent' ? [b, a] : [null, null];
-    if (ag && other?.kind === 'note') { await store.attach(other.doc.id, [ag.name]); return `${ag.name} lê ${other.doc.title}`; }
+    if (ag && other?.kind === 'note') { await store.attach(other.doc.id, [ag.name]); return t('{0} reads {1}', ag.name, other.doc.title); }
     await P.link(this.project.id, aId, bId);
     const br = a.kind === 'browser' || b.kind === 'browser';
-    return `${nodeLabel(a)} → ${nodeLabel(b)}${br ? ' · reabra o chat do agente (x, i) para ele ganhar as ferramentas do browser' : ''}`;
+    return `${nodeLabel(a)} → ${nodeLabel(b)}${br ? ` · ${t('reopen the agent chat (x, i) so it gets the browser tools')}` : ''}`;
   }
   async commitLink() {
     const src = this.linking?.source, dst = this.sel; if (!src || !dst) return;
-    if (src === dst) { this.say('escolha outro nó'); return; }
+    if (src === dst) { this.say(t('pick another node')); return; }
     this.linking = null;
     try { const msg = await this.connect(src, dst); if (msg) { await this.load(); this.say(msg, 4000); } }
     catch (e) { this.say((e as Error).message, 5000); }
@@ -338,11 +357,11 @@ export class App {
   removeSel() {
     const n = this.node(this.sel); if (!n || !this.project) return;
     const pid = this.project.id;
-    if (n.kind === 'agent' && !n.item) { this.say('sessão descoberta não se remove — ela é do disco', 4000); return; }
-    if (n.kind === 'task') { this.say('tarefa é do agente — ele a fecha com TaskUpdate', 4000); return; }
-    if (n.kind === 'file' && n.item.context) { this.say('arquivo de contexto do Claude — ele é lido em toda sessão; edite com e, não se desliga', 5000); return; }
-    const what = n.kind === 'note' ? `apagar a nota "${n.doc.title}"?` : n.kind === 'file' ? `desligar ${n.item.label} do projeto?` : n.kind === 'service' ? `remover ${n.item.name} do projeto?` : n.kind === 'browser' ? 'remover o browser do projeto?' : `remover o agente ${n.name}?`;
-    const lines = n.kind === 'note' ? ['o arquivo da nota some'] : n.kind === 'file' ? ['o arquivo continua no disco; só sai do mapa'] : n.kind === 'service' ? ['o processo continua rodando; só sai do mapa'] : n.kind === 'browser' ? ['o Chrome fecha; a entrada playwright fica no .mcp.json'] : ['o transcript fica; o worktree também'];
+    if (n.kind === 'agent' && !n.item) { this.say(t('a discovered session cannot be removed — it lives on disk'), 4000); return; }
+    if (n.kind === 'task') { this.say(t('the task belongs to the agent — it closes it with TaskUpdate'), 4000); return; }
+    if (n.kind === 'file' && n.item.context) { this.say(t('Claude context file — read every session; edit with e, it cannot be unlinked'), 5000); return; }
+    const what = n.kind === 'note' ? t('delete the note "{0}"?', n.doc.title) : n.kind === 'file' ? t('unlink {0} from the project?', n.item.label) : n.kind === 'service' ? t('remove {0} from the project?', n.item.name) : n.kind === 'browser' ? t('remove the browser from the project?') : t('remove agent {0}?', n.name);
+    const lines = n.kind === 'note' ? [t('the note file is deleted')] : n.kind === 'file' ? [t('the file stays on disk; it only leaves the map')] : n.kind === 'service' ? [t('the process keeps running; it only leaves the map')] : n.kind === 'browser' ? [t('Chrome closes; the playwright entry stays in .mcp.json')] : [t('the transcript stays; so does the worktree')];
     this.modal = { kind: 'confirm', title: what, lines, ok: async () => {
       if (n.kind === 'browser') { this.closeLive(); await P.closeBrowser(n.item); }
       if (n.kind === 'note') await unlink(n.doc.path); else await P.removeItem(pid, n.id);
@@ -384,7 +403,7 @@ export class App {
     if (!this.showPanel || !this.agent) return null;
     const s = this.agent.session;
     const last = this.evs[this.evs.length - 1];
-    const state = this.chat?.busy ? `pensando${'…'}${this.chat.thinking ? ` ${tok(this.chat.thinking)}` : ''}` : last?.tool ? `${last.tool} em andamento` : last?.role === 'assistant' ? 'esperando você' : s ? 'ocioso' : 'sessão nova';
+    const state = this.chat?.busy ? `${t('thinking')}…${this.chat.thinking ? ` ${tok(this.chat.thinking)}` : ''}` : last?.tool ? t('{0} in progress', last.tool) : last?.role === 'assistant' ? t('waiting for you') : s ? t('idle') : t('new session');
     return {
       context: s?.context ?? 0, window: s ? windowOf(s.model, s.context) : 200_000,
       model: this.chat?.model || s?.model || '', effort: this.chat?.effort || s?.effort || '', perm: this.chat?.permissionMode || '',
@@ -397,33 +416,34 @@ export class App {
   /** y: copia o turno sob o cursor (o que você disse, ou o que ele respondeu) para o clipboard. */
   copyTurn() {
     const r = this.rowsAll[this.aCursor] ?? this.rowsAll[this.rowsAll.length - 2];
-    const turn = r?.turn; if (!turn) { this.say('nada para copiar aqui'); return; }
+    const turn = r?.turn; if (!turn) { this.say(t('nothing to copy here')); return; }
     const i = this.evs.findIndex((e) => e.uuid === turn);
     const chunk = this.evs.slice(i).filter((e, k) => k === 0 || (e.role === 'assistant' && !e.tool && e.full && this.evs.slice(i + 1, i + k).every((x) => !(x.role === 'user' && !x.tool && !x.meta))));
     const text = chunk.map((e) => (e.role === 'user' ? `> ${e.full ?? e.text}` : e.full ?? e.text)).join('\n\n');
     try {
       const p = Bun.spawn(['pbcopy'], { stdin: 'pipe' }); p.stdin.write(text); p.stdin.end();
       this.say(`copiado: ${[...text].length} caracteres`);
-    } catch { this.say('pbcopy não disponível'); }
+    } catch { this.say(t('pbcopy not available')); }
   }
   async startChat() {
     const a = this.agent; if (!a) return;
+    if (!this.consentOk) { await this.withConsent(() => this.startChat()); return; }
     const browser = !!(this.project && a.item && (await P.agentHasBrowser(this.project.id, a.item.id)));
     if (browser && this.project && a.item) {
       // o Playwright do agente liga no Chrome do anthive: ele precisa estar de pé antes do processo subir
       const it = await P.browserOf(this.project.id, a.item.id);
       if (it) {
-        try { await P.ensureBrowserServer(a.cwd, it.port); const r = await P.ensureBrowserUp(it); if (r === 'subiu') this.say(`chrome ${MODE_LABEL[it.mode]} subiu para o agente`, 4000); }
-        catch (e) { this.say(`chrome não subiu: ${(e as Error).message}`, 7000); }
+        try { await P.ensureBrowserServer(a.cwd, it.port); const r = await P.ensureBrowserUp(it); if (r === 'started') this.say(t('chrome ({0}) is up for the agent', modeLabel(it.mode)), 4000); }
+        catch (e) { this.say(t('chrome did not start: {0}', (e as Error).message), 7000); }
       }
     }
     const sid = a.session ? basename(a.session.path, '.jsonl') : a.item?.sessionId ?? null;
-    if (!sid) { this.say('essa sessão não tem id — abra pelo projeto de novo'); return; }
+    if (!sid) { this.say(t('this session has no id — open it from the project again')); return; }
     if (this.chat?.sessionId === sid) return;
     this.chat?.stop();
     // o barramento tem que existir no diretório ANTES do processo subir: é lido na partida
-    try { const bus = await P.ensureBus(a.cwd); if (bus !== 'já estava') this.say(`barramento ${bus} em .mcp.json — note_write, project_map e o resto já valem aqui`, 6000); }
-    catch (e) { this.say(`não consegui gravar .mcp.json: ${(e as Error).message}`, 6000); }
+    try { const bus = await P.ensureBus(a.cwd); if (bus !== 'unchanged') this.say(t('bus {0} in .mcp.json — note_write, project_map and the rest work here now', bus === 'new' ? t('new') : t('updated')), 6000); }
+    catch (e) { this.say(t('could not write .mcp.json: {0}', (e as Error).message), 6000); }
     this.chat = new ChatSession({ cwd: a.cwd, resume: a.session ? sid : undefined, sessionId: a.session ? undefined : sid, agent: a.item?.name, browser,
       model: this.prefs.model || undefined, effort: this.prefs.effort || undefined, permissionMode: this.prefs.permissionMode || undefined }, (e) => this.onChat(e));
     this.chat.start();
@@ -431,35 +451,35 @@ export class App {
   stopChat() { this.chat?.stop(); this.chat = null; this.composing = false; this.dirty = true; }
   private onChat(e: ChatEvent) {
     if (e.kind === 'ev') { this.evs.push(e.ev); this.rebuild(true); }
-    else if (e.kind === 'result') { this.screen.write('\x07'); const den = e.denials.length ? ` · negou ${e.denials.join(', ')} — p muda a permissão` : ''; this.say(`${e.stop || 'ok'}${e.cost ? ` · $${e.cost.toFixed(3)}` : ''}${den}`, den ? 8000 : 3000); }
+    else if (e.kind === 'result') { this.screen.write('\x07'); const den = e.denials.length ? ` · ${t('denied {0} — p changes permissions', e.denials.join(', '))}` : ''; this.say(`${e.stop || 'ok'}${e.cost ? ` · $${e.cost.toFixed(3)}` : ''}${den}`, den ? 8000 : 3000); }
     else if (e.kind === 'stderr') this.say(e.text.split('\n')[0] ?? 'erro', 6000);
-    else if (e.kind === 'exit') { if (this.chat && !this.chat.proc) return; this.say(`chat saiu (${e.code})`, 5000); this.chat = null; this.composing = false; }
+    else if (e.kind === 'exit') { if (this.chat && !this.chat.proc) return; this.say(t('chat exited ({0})', e.code), 5000); this.chat = null; this.composing = false; }
     this.dirty = true;
   }
   sendChat() {
     const text = this.chatInput.value.trim(); if (!text) return;
-    if (!this.chat) { this.say('abrindo o chat… mande de novo em um instante'); void this.op(this.startChat()); return; }
-    if (this.chat.busy) { this.say('espere a resposta terminar'); return; }
+    if (!this.chat) { this.say(t('opening the chat… send again in a moment')); void this.op(this.startChat()); return; }
+    if (this.chat.busy) { this.say(t('wait for the answer to finish')); return; }
     if (!this.chat.send(text)) { this.say('chat caiu — i reabre'); this.chat = null; return; }
     this.evs.push({ uuid: crypto.randomUUID(), parent: null, sidechain: false, type: 'user', ts: Date.now(), role: 'user', text });
     this.rebuild(true); this.chatInput.set('');
   }
   pickSetting(kind: 'model' | 'effort' | 'permissionMode') {
-    const label = { model: 'modelo', effort: 'esforço', permissionMode: 'permissão' }[kind];
+    const label = { model: t('model'), effort: t('effort'), permissionMode: t('permissions') }[kind];
     const base = { model: MODELS, effort: EFFORTS, permissionMode: PERMISSIONS }[kind];
     const cur = this.chat?.[kind] || this.prefs[kind] || (kind === 'model' ? this.agent?.session?.model : kind === 'effort' ? this.agent?.session?.effort : '') || '';
     const values = cur && !base.includes(cur) ? [cur, ...base] : [...base];
-    const items: PickItem[] = [{ value: '', label: '(padrão da sessão)', hint: 'não passa a flag', current: !cur }, ...values.map((v) => ({ value: v, label: v, current: v === cur }))];
-    this.modal = { kind: 'pick', title: label, items, index: Math.max(0, items.findIndex((i) => i.current)), note: this.chat ? 'reinicia na mesma sessão — nada se perde' : 'vale para o próximo chat',
-      submit: async (v) => { this.prefs[kind] = v; if (this.chat) this.chat.restart({ [kind]: v } as any); return `${label}: ${v || 'padrão'}`; } };
+    const items: PickItem[] = [{ value: '', label: t('(session default)'), hint: t('no flag passed'), current: !cur }, ...values.map((v) => ({ value: v, label: v, current: v === cur }))];
+    this.modal = { kind: 'pick', title: label, items, index: Math.max(0, items.findIndex((i) => i.current)), note: this.chat ? t('restarts in the same session — nothing is lost') : t('applies to the next chat'),
+      submit: async (v) => { this.prefs[kind] = v; if (this.chat) this.chat.restart({ [kind]: v } as any); return `${label}: ${v || t('default')}`; } };
     this.dirty = true;
   }
   /** Ligar a partir de uma tela de item: lista os outros nós do projeto. */
   pickLinkTarget(fromId: string) {
     if (!this.pv) return;
     const items: PickItem[] = this.pv.nodes.filter((n) => n.id !== fromId).map((n) => ({ value: n.id, label: `${n.kind === 'agent' ? KIND_GLYPH.agent : KIND_GLYPH[n.kind]} ${nodeLabel(n)}`, hint: n.kind }));
-    if (!items.length) { this.say('não há outro nó no projeto'); return; }
-    this.modal = { kind: 'pick', title: 'ligar a', items, index: 0, submit: async (id) => { const m = await this.connect(fromId, id); if (m) await this.load(); return m; } };
+    if (!items.length) { this.say(t('no other node in the project')); return; }
+    this.modal = { kind: 'pick', title: t('link to'), items, index: 0, submit: async (id) => { const m = await this.connect(fromId, id); if (m) await this.load(); return m; } };
     this.dirty = true;
   }
   toggleTurn() {
@@ -555,7 +575,7 @@ export class App {
         else if (k.k === 'esc') { this.project = null; this.pv = null; this.view = 'home'; void this.op(this.load()); }
         else if (k.k === 'char') {
           if (k.c === 'n') this.pickKind();
-          else if (k.c === 'l') { if (!this.sel) this.say('selecione algo primeiro'); else if ((this.rectsOnScreen().length) < 2) this.say('não há outro nó para ligar'); else { this.linking = { source: this.sel }; this.dirty = true; } }
+          else if (k.c === 'l') { if (!this.sel) this.say(t('select something first')); else if ((this.rectsOnScreen().length) < 2) this.say(t('no other node to link')); else { this.linking = { source: this.sel }; this.dirty = true; } }
           else if (k.c === 'd') this.removeSel();
           else if (k.c === 'r') void this.load();
           else if (k.c === ']') { this.showPanel = !this.showPanel; this.ensureVisible(); this.dirty = true; }
@@ -586,7 +606,7 @@ export class App {
         else if (k.k === 'mouse' && k.press && k.button === 0) clickAt(k.x, k.y);
         else if (k.k === 'wheel' && box && live?.frame && inBox(k.x, k.y, box)) { const p = toPage(k.x, k.y, box, live.frame.w, live.frame.h); live.wheel(p.x, p.y, k.dir * 120); }
         else if ((k.k === 'up' || k.k === 'down') && live?.frame) live.wheel(Math.round(live.frame.w / 2), Math.round(live.frame.h / 2), k.k === 'up' ? -160 : 160);
-        else if (k.k === 'char' && k.c === 'i') { if (live?.connected) this.typing = true; else this.say('sem página ao vivo para digitar', 3000); }
+        else if (k.k === 'char' && k.c === 'i') { if (live?.connected) this.typing = true; else this.say(t('no live page to type into'), 3000); }
         else if (k.k === 'char' && k.c === 'o') void this.op(this.toggleBrowserMode());
         else if (k.k === 'char' && k.c === 'r') live?.reload();
         else if (k.k === 'char' && k.c === 'l' && b) this.pickLinkTarget(b.id);
@@ -617,8 +637,8 @@ export class App {
           if (k.c === 'i') { this.composing = true; if (!this.chat) void this.op(this.startChat()); }
           else if (k.c === 'm') this.pickSetting('model'); else if (k.c === 'e') this.pickSetting('effort'); else if (k.c === 'p') this.pickSetting('permissionMode');
           else if (k.c === 'l' && this.agent) this.pickLinkTarget(this.agent.id);
-          else if (k.c === 'x') { this.stopChat(); this.say('chat encerrado — o transcript fica'); }
-          else if (k.c === 't') { this.showThinking = !this.showThinking; this.rebuild(false); this.say(this.showThinking ? 'pensamento visível' : 'pensamento escondido'); }
+          else if (k.c === 'x') { this.stopChat(); this.say(t('chat stopped — the transcript stays')); }
+          else if (k.c === 't') { this.showThinking = !this.showThinking; this.rebuild(false); this.say(this.showThinking ? t('thinking shown') : t('thinking hidden')); }
           else if (k.c === 'y') this.copyTurn();
           else if (k.c === ']') { this.showPanel = !this.showPanel; this.rebuild(false); }
           else if (k.c === 'g') { this.aScroll = 0; this.aCursor = 0; } else if (k.c === 'G') { this.aScroll = max; this.aCursor = -1; }
@@ -636,7 +656,7 @@ export class App {
         else if (k.k === 'char' && k.c === 'e' && this.view === 'file' && this.file) { this.editExternal(this.file.path); void readFile(this.file.path, 'utf8').then((t) => { this.fileLines = t.split('\n'); this.dirty = true; }); }
         else if (k.k === 'char' && k.c === 'k' && this.view === 'service' && this.service) {
           const s = this.service;
-          this.modal = { kind: 'confirm', title: `encerrar ${s.name} (pid ${s.pid})?`, lines: [s.command, 'SIGTERM — o processo decide como parar'], ok: async () => { const ok = svc.stop(s.pid); await this.load(); return ok ? 'sinal enviado' : 'não deu — processo já morto ou sem permissão'; } };
+          this.modal = { kind: 'confirm', title: t('stop {0} (pid {1})?', s.name, s.pid), lines: [s.command, t('SIGTERM — the process decides how to stop')], ok: async () => { const ok = svc.stop(s.pid); await this.load(); return ok ? t('signal sent') : t('failed — process already dead or no permission'); } };
         }
         this.dirty = true; return;
       }
@@ -649,7 +669,7 @@ export class App {
     if (this.grid.W !== this.screen.W || this.grid.H !== this.screen.H) { this.grid = new Grid(this.screen.W, this.screen.H); this.prev = null; this.screen.write('\x1b[2J'); if (this.view === 'agent') this.rebuild(false); }
     this.grid.clear();
     const g = this.grid;
-    if (this.screen.W < 60 || this.screen.H < 16) { g.put(1, 1, 'terminal pequeno demais', C.dead); g.put(1, 2, `${this.screen.W}x${this.screen.H} — mínimo 60x16`, C.dim); }
+    if (this.screen.W < 60 || this.screen.H < 16) { g.put(1, 1, t('terminal too small'), C.dead); g.put(1, 2, `${this.screen.W}x${this.screen.H} — ${t('minimum 60x16')}`, C.dim); }
     else if (this.view === 'home') renderHome(g, this.cards, this.homeSel, this.homeScroll, this.status);
     else if (this.view === 'project' && this.pv) renderProject(g, this.pv, this.sel, this.pScroll, this.status, { linkSource: this.linking?.source ?? null, tick: this.pulsing() ? this.tick : -1, panel: this.showPanel });
     else if (this.view === 'diff' && this.diffEv) this.diffTotal = renderDiff(g, this.diffEv, hunksOf(this.diffEv), this.diffScroll, this.status);
@@ -696,10 +716,11 @@ export class App {
     }
   }
   private linksOf(id: string): string[] { return (this.pv?.edges ?? []).filter((e) => e.from === id || e.to === id).map((e) => { const n = this.node(e.from === id ? e.to : e.from); return n ? nodeLabel(n) : '?'; }); }
-  private pulsing() { return this.view === 'project' && !this.modal && !!this.pv && this.pv.edges.some((e) => e.kind !== 'talk' || (e.thread && store.threadState(e.thread).state === 'aberta')); }
+  private pulsing() { return this.view === 'project' && !this.modal && !!this.pv && this.pv.edges.some((e) => e.kind !== 'talk' || (e.thread && store.threadState(e.thread).state === 'open')); }
 
   quit(): never { this.chat?.stop(); this.screen.restore(); process.exit(0); }
   async run(initial?: P.Project) {
+    await this.loadConsent();
     if (initial) { this.project = initial; this.view = 'project'; }
     await this.load();
     this.screen.enter(() => { this.screen.measure(); this.prev = null; this.dirty = true; });

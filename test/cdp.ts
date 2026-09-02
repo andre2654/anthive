@@ -48,7 +48,7 @@ const port = server.port!;
 const c = await Cdp.connect(port);
 const ts = await c.targets();
 must('targets filtra só páginas', ts.length === 2 && ts.every((t) => t.id.startsWith('p')));
-must('pickPage prefere a página com alguém ligado (o agente)', pickPage(ts)?.id === 'p1');
+must('pickPage prefere a página com alguém ligado (o agent)', pickPage(ts)?.id === 'p1');
 must('pickPage ignora páginas do próprio chrome', pickPage([{ id: 'a', url: 'chrome://x', title: '' }, { id: 'b', url: 'https://x', title: '' }, { id: 'c', url: 'devtools://y', title: '' }])?.id === 'b');
 let err = ''; try { await c.send('Boom'); } catch (e) { err = (e as Error).message; }
 must('erro do protocolo vira rejeição com a mensagem', err === 'explodiu');
@@ -59,7 +59,7 @@ let changes = 0;
 const live = new LiveView(port, () => changes++, { minGapMs: 0 });
 await live.start();
 await Bun.sleep(250);
-must('liga na página do agente e sabe url/título', live.connected && live.target?.id === 'p1' && live.url === 'https://loja.dev/pedidos' && live.title === 'Pedidos');
+must('liga na página do agent e sabe url/título', live.connected && live.target?.id === 'p1' && live.url === 'https://loja.dev/pedidos' && live.title === 'Pedidos');
 must('frames chegam com o tamanho do viewport', live.frames === 3 && live.frame?.w === 1200 && live.frame?.h === 800 && live.frame.data === 'iVBORw0KGgo=');
 must('cada frame foi confirmado (ack)', seen.filter((s) => s === 'Page.screencastFrameAck').length === 3);
 must('avisou a tela a cada mudança', changes >= 4);
@@ -82,7 +82,7 @@ must('célula do meio da caixa cai no meio da página', Math.abs(pt.x - 607) <= 
 must('inBox respeita os limites', inBox(10, 4, { x: 10, y: 4, cols: 90, rows: 28 }) && !inBox(100, 4, { x: 10, y: 4, cols: 90, rows: 28 }) && !inBox(9, 4, { x: 10, y: 4, cols: 90, rows: 28 }));
 
 // --- lançamento
-const a1 = launchArgs('/p/x', 9400, 'oculto'), a2 = launchArgs('/p/x', 9400, 'janela');
+const a1 = launchArgs('/p/x', 9400, 'hidden'), a2 = launchArgs('/p/x', 9400, 'window');
 must('oculto é headless e já abre uma página', a1.includes('--headless=new') && a1.includes('about:blank') && a1.includes('--user-data-dir=/p/x') && a1.includes('--remote-debugging-port=9400'));
 must('janela nasce sem janela inicial (é o que evita roubar o foco)', a2.includes('--no-startup-window') && !a2.includes('--headless=new'));
 must('a janela coberta continua desenhando', a1.includes('--disable-backgrounding-occluded-windows') && a2.includes('--disable-backgrounding-occluded-windows'));

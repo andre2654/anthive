@@ -14,6 +14,6 @@ must('Write é tudo novo', w[0]!.lines.length === 2 && w[0]!.lines.every((l) => 
 const m = hunksOf(ev('MultiEdit', { file_path: '/p/c.ts', edits: [{ old_string: 'a', new_string: 'b' }, { old_string: 'c', new_string: 'd' }] }));
 must('MultiEdit vira dois hunks', m.length === 2);
 const big = hunksOf(ev('Edit', undefined as any));
-must('sem entrada guardada: explica em vez de quebrar', big[0]!.note?.includes('grande') === true);
+must('sem entrada guardada: explica em vez de quebrar', big[0]!.note?.includes('too large') === true);
 console.log(fails ? `\n${fails} falha(s)` : '\ntudo verde');
 process.exit(fails ? 1 : 0);
