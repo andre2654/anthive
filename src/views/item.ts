@@ -159,7 +159,8 @@ export function renderBrowser(g: Grid, n: BrowserNode, s: BrowserScreen, status:
       const refs = snapshotRefs(st.snapshot);
       const rows = Math.max(1, g.H - 12);
       if (!refs.length) g.put(refsX, top + 1, fit(t('no snapshot yet'), w), C.dim);
-      for (let i = 0; i < Math.min(refs.length, rows); i++) { const r = refs[i]!; g.put(refsX, top + 1 + i, pad(r.ref, 4), C.link); g.put(refsX + 4, top + 1 + i, fit(r.text, w - 4), C.dim); }
+      const rw = Math.min(10, Math.max(4, ...refs.map((r) => r.ref.length + 2)));   // e2 or f1e22: the column fits the longest ref
+      for (let i = 0; i < Math.min(refs.length, rows); i++) { const r = refs[i]!; g.put(refsX, top + 1 + i, pad(r.ref, rw), C.link); g.put(refsX + rw, top + 1 + i, fit(r.text, w - rw), C.dim); }
       if (refs.length > rows) g.put(refsX, top + 1 + rows, fit(t('… {0} more', refs.length - rows), w), C.dim);
       const y2 = g.H - 7;
       head(y2, t('agent'));
