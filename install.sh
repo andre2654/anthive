@@ -1,9 +1,9 @@
 #!/bin/sh
 # Anthive installer — macOS only (Apple Silicon and Intel).
-#   curl -fsSL https://raw.githubusercontent.com/andresaraivafintex/anthive/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/andre2654/anthive/main/install.sh | sh
 #   … | sh -s -- --alias        also links `ai` to it
 set -e
-REPO="andresaraivafintex/anthive"
+REPO="andre2654/anthive"
 BIN_DIR="${ANTHIVE_BIN_DIR:-$HOME/.local/bin}"
 case "$(uname -s)" in Darwin) ;; *) echo "anthive 0.1 runs on macOS only"; exit 1;; esac
 case "$(uname -m)" in arm64) ARCH=arm64;; x86_64) ARCH=x64;; *) echo "unsupported arch: $(uname -m)"; exit 1;; esac

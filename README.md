@@ -2,8 +2,8 @@
 
 **An ant hive for your Claude Code agents.** A live map of agents, notes, memory, services and a browser — all linked, all in the terminal.
 
-[![ci](https://github.com/andresaraivafintex/anthive/actions/workflows/ci.yml/badge.svg)](https://github.com/andresaraivafintex/anthive/actions/workflows/ci.yml)
-[![release](https://img.shields.io/github/v/release/andresaraivafintex/anthive?display_name=tag)](https://github.com/andresaraivafintex/anthive/releases)
+[![ci](https://github.com/andre2654/anthive/actions/workflows/ci.yml/badge.svg)](https://github.com/andre2654/anthive/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/andre2654/anthive?display_name=tag)](https://github.com/andre2654/anthive/releases)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ![the project map: agents on the left, notes, files, services and a browser on the right, pulsing links between them](docs/map.png)
@@ -17,7 +17,7 @@ No web app, no Electron, no tmux. One binary, your own Claude subscription.
 macOS (Apple Silicon or Intel). You need [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and logged in.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/andresaraivafintex/anthive/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/andre2654/anthive/main/install.sh | sh
 ```
 
 Add `--alias` (`sh -s -- --alias`) to also get `ai` as a shortcut. Then:
