@@ -1,6 +1,6 @@
 import { Grid } from '../src/tui/grid.ts';
 import { renderProject } from '../src/views/project.ts';
-import { renderBrowser } from '../src/views/item.ts';
+import { renderBrowser, snapshotRefs } from '../src/views/item.ts';
 import { rows } from '../src/views/agent.ts';
 import type { View, BrowserNode } from '../src/core/project.ts';
 import { Ev } from '../src/core/sessions.ts';
@@ -36,6 +36,8 @@ renderBrowser(g4, br, { live: null, box: null, typing: false, canImg: false, boo
 const t4 = g4.toString();
 must('sem imagem, explica e mostra o snapshot com refs', t4.includes('cannot draw images') && t4.includes('[ref=e2]'));
 
+const fr = snapshotRefs('- generic [ref=f1e1]:\n  - cell "ord_9f21" [ref=f1e22]\n  - button "Retry" [ref=e3]');
+must('refs with a frame prefix (f1e22) are extracted too', fr.length === 3 && fr[1]!.ref === 'f1e22' && fr[1]!.text === 'cell "ord_9f21"' && fr[2]!.ref === 'e3');
 const ev = (o: Partial<Ev>): Ev => ({ uuid: crypto.randomUUID(), parent: null, sidechain: false, type: 'assistant', ts: 0, role: 'assistant', text: '', ...o });
 const rs = rows([ev({ type: 'user', role: 'user', text: 'abra a loja', full: 'abra a loja' }), ev({ text: 'browser_navigate', tool: 'mcp__playwright__browser_navigate', input: { url: 'https://loja.dev' } }), ev({ text: 'browser_click', tool: 'browser_click', input: { element: 'link Novo', ref: 'e2' } })], '', new Set(), 60);
 must('árvore mostra o agent no browser sem o prefixo', rs.some((r) => r.name === 'navigate' && r.detail === 'https://loja.dev') && rs.some((r) => r.name === 'click' && r.detail.includes('Novo')));

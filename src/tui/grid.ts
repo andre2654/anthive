@@ -108,6 +108,12 @@ export class Grid {
   }
 
   /** O que está desenhado numa célula — usado para rotear sem atropelar texto. */
+  /** Everything in one cell — what a renderer other than the terminal needs (docs/shots.ts draws PNGs from it). */
+  cell(x: number, y: number): { ch: string; fg: RGB; bg: RGB | null } {
+    const i = y * this.W + x;
+    return { ch: this.ch[i] ?? ' ', fg: unpack(this.co[i] ?? packed(C.ink)), bg: (this.bgc[i] ?? -1) < 0 ? null : unpack(this.bgc[i]!) };
+  }
+
   at(x: number, y: number): string {
     if (x < 0 || x >= this.W || y < 0 || y >= this.H) return '';
     return this.ch[y * this.W + x]!;

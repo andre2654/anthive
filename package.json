@@ -16,7 +16,8 @@
     "test:browser": "ANTHIVE_HOME=$(mktemp -d) bun run test/e2e-browser.ts",
     "test:chrome": "bun run test/chrome.ts",
     "build:x64": "bun build --compile --target=bun-darwin-x64 --outfile dist/anthive-darwin-x64 src/index.ts",
-    "build:arm64": "bun build --compile --target=bun-darwin-arm64 --outfile dist/anthive-darwin-arm64 src/index.ts"
+    "build:arm64": "bun build --compile --target=bun-darwin-arm64 --outfile dist/anthive-darwin-arm64 src/index.ts",
+    "shots": "bun run docs/shots.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"

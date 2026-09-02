@@ -113,7 +113,7 @@ export function renderService(g: Grid, s: ServiceItem, st: Stats | null, alive: 
 export function snapshotRefs(snapshot: string): { ref: string; text: string }[] {
   const out: { ref: string; text: string }[] = [];
   for (const l of snapshot.split('\n')) {
-    const m = /\[ref=(e\d+)\]/.exec(l); if (!m) continue;
+    const m = /\[ref=([\w-]+)\]/.exec(l); if (!m) continue;   // e12, or f1e12 inside a frame
     out.push({ ref: m[1]!, text: l.replace(/\s*\[[^\]]*\]/g, '').replace(/^\s*-\s*/, '').replace(/:\s*$/, '').trim() });
   }
   return out;

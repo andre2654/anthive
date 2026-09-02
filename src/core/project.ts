@@ -49,6 +49,8 @@ async function saveProjects(list: Project[]) {
 }
 
 export async function createProject(name: string, cwd: string): Promise<Project> {
+  // Claude Code resolves symlinks before building the transcript slug (/var → /private/var): store the real path so sessions match
+  cwd = await realpath(cwd).catch(() => cwd);
   const list = await listProjects();
   const dir = resolve(cwd.replace(/^~(?=\/|$)/, homedir()));
   const existing = list.find((p) => p.cwd === dir);

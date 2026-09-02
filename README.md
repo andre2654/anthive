@@ -36,6 +36,9 @@ For the live browser image you need a terminal that speaks the Kitty graphics pr
 1. **Projects.** `n` creates one (a name and a directory). `↵` opens it.
 2. **The map.** Agents on the left, everything else on the right, links drawn between them. `n` adds an agent, a note, a file, a service running on this machine, a browser, or the project's `CLAUDE.md`. `l` links the selected node to another one. `↵` opens it. `]` toggles the side panel.
 3. **An agent** is a named Claude Code session. Open it: a chat with the whole transcript as a tree, markdown, the agent's thinking (`t`), the diffs of every edit (`↵` on an Edit), and a panel with context usage, links and tasks. `m`/`e`/`p` switch model, effort and permission mode mid-session.
+
+   ![the agent chat: the transcript as a tree, tool calls collapsed, browser actions marked, and the panel with memory, links and tasks](docs/chat.png)
+
 4. **A new agent reads the map first.** It gets a briefing of the project — the other agents, notes, files, services — and decides what to link to before touching the request. If the repo has no `CLAUDE.md`, it generates one with `/init` and links it to every agent.
 5. **Agents talk to each other** through a small MCP bus: notes with access lists and TTLs, threads with a mandatory goal and a turn budget (only you can extend it), and everything another agent wrote arrives framed as data, not instructions.
 6. **The browser.** `n → browser`, link an agent to it, open the chat. The agent gets `browser_*` tools; you get the page.
