@@ -21,7 +21,7 @@ await P.link(p.id, api.id, b.id);
 must('ligado, tem', await P.agentHasBrowser(p.id, api.id) && (await P.browserOf(p.id, api.id))?.id === b.id);
 const argv = new ChatSession({ cwd: repo, browser: true }, () => {}).argv();
 must('chat ligado autoriza mcp__playwright', argv.includes('mcp__playwright'));
-must('e instrui como o Maestri: snapshot primeiro, refs, sem fechar', argv.some((a) => a.includes('browser_snapshot') && a.includes('browser_close')));
+must('instructs the agent: snapshot first, refs, never close', argv.some((a) => a.includes('browser_snapshot') && a.includes('browser_close')));
 must('sem browser, nada disso entra', !new ChatSession({ cwd: repo }, () => {}).argv().includes('mcp__playwright'));
 must('primeiro turno idem', P.firstTurnPlan(api, 'x', false, true)[0]!.includes('mcp__playwright') && !P.firstTurnPlan(api, 'x', false, false)[0]!.includes('mcp__playwright'));
 const ev = (o: Partial<Ev>): Ev => ({ uuid: crypto.randomUUID(), parent: null, sidechain: false, type: 'assistant', ts: 0, role: 'assistant', text: '', ...o });

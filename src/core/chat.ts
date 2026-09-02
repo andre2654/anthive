@@ -15,17 +15,17 @@ import { join } from 'node:path';
 /**
  * Vai em --append-system-prompt de todo chat e primeiro turno. Sem isto o Claude
  * confunde "criar nota" e "ligar agente" com skills de outros canvases
- * (maestri, nodeterm) instaladas globalmente — aconteceu de verdade.
+ * de outros canvases instaladas globalmente — aconteceu de verdade.
  */
 export const SYSTEM_PREAMBLE = [
   'You are being operated by Anthive, a map of projects in the terminal.',
   'In this environment, notes, links, agent-to-agent conversations and the project map are the MCP tools of the "anthive" server:',
   'note_write (creates a note already linked to you), note_read, notes_list, project_map, send_message, inbox, thread_read, thread_post, thread_conclude, agents_list.',
   'When the user asks you to create a note, link to something, see the project or talk to another agent, use these tools.',
-  'Do not use skills or CLIs from other canvases (maestri, nodeterm, etc.) for this — they are not active in this session.',
+  'Do not use skills or CLIs from other agent canvases for this — they are not active in this session.',
 ].join(' ');
 
-/** Copiado do jeito que o Maestri instrui o portal: snapshot primeiro, refs como seletor, screenshot só para ver layout. */
+/** How the agent is told to drive the browser: snapshot first, refs as selectors, screenshot only to see layout. */
 export const BROWSER_PREAMBLE = [
   'You have a browser (MCP server "playwright", browser_* tools).',
   'ALWAYS start with browser_snapshot: it returns the page accessibility tree with refs — use those refs in browser_click, browser_type and browser_fill_form; it is the most reliable selector.',

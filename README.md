@@ -52,7 +52,7 @@ Anthive owns the Chrome. It starts a Chrome for Testing (the Playwright one, or 
 - **hidden** (default): headless. No window, no Dock icon, nothing steals focus. The page lives in the terminal.
 - **window**: `o` switches to a real Chrome window that opens without stealing focus. Same profile, logins kept, the agent reconnects by itself.
 
-The agent is instructed the way [Maestri](https://github.com/maestri-ai) teaches its portal: snapshot first (the accessibility tree with refs), refs as selectors, screenshots only for layout, never close the browser on its own — and that the page is shared with you.
+The agent is told how to use it: snapshot first (the accessibility tree with refs), refs as selectors, screenshots only for layout, never close the browser on its own — and that the page is shared with you.
 
 ## How it works
 
