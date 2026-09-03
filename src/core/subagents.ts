@@ -8,6 +8,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe } from './sessions.ts';
+import { sessionGone } from './procs.ts';
 
 export interface Subagent {
   id: string;           // the Agent tool_use id
@@ -23,9 +24,10 @@ export interface Subagent {
   tokens: number;       // output tokens so far
   tools: number;        // tool calls so far
   ageMs: number;        // since its transcript last grew (Infinity without one)
-  silent: boolean;      // not done and nothing written for ten minutes: whatever ran it is gone
+  silent: boolean;      // not done and nothing written for ten minutes: it may be stuck
+  orphan: boolean;      // not done and no process holds the session: it was killed, it will never finish
 }
-export type SubagentHead = Omit<Subagent, 'path' | 'now' | 'tokens' | 'tools' | 'ageMs' | 'silent'>;
+export type SubagentHead = Omit<Subagent, 'path' | 'now' | 'tokens' | 'tools' | 'ageMs' | 'silent' | 'orphan'>;
 
 const HARNESS = /^\s*<(task-notification|system-reminder|local-command-)/;
 const TAIL = 4 * 1024 * 1024;   // a turn lives at the end of the transcript
@@ -130,13 +132,14 @@ export async function subagentsOfSession(path: string, size: number): Promise<Su
   }
   if (!hit.subs.length) return [];
   const dir = join(path.replace(/\.jsonl$/, ''), 'subagents');
+  const gone = await sessionGone(path.replace(/^.*\//, '').replace(/\.jsonl$/, ''));
   const out: Subagent[] = [];
   for (const s of hit.subs) {
     const p = await fileFor(dir, s.id);
     const tl = p ? await tailOf(p) : null;
     const ageMs = tl ? Math.max(0, Date.now() - tl.mtime) : Infinity;
     const silent = !s.done && (tl ? ageMs > SILENT_MS : Date.now() - s.started > SILENT_MS);
-    out.push({ ...s, path: p, now: tl?.now ?? '', tokens: tl?.tokens ?? 0, tools: tl?.tools ?? 0, ageMs, silent });
+    out.push({ ...s, path: p, now: tl?.now ?? '', tokens: tl?.tokens ?? 0, tools: tl?.tools ?? 0, ageMs, silent, orphan: !s.done && gone });
   }
   return out;
 }

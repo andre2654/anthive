@@ -159,6 +159,7 @@ function agentBox(g: Grid, n: AgentNode, r: Rect, on: boolean, src: boolean) {
 export const subState = (s: SubNode['sub']): { glyph: string; color: RGB; label: string } =>
   s.error ? { glyph: G.stuck, color: C.dead, label: t('failed') }
   : s.done ? { glyph: G.idle, color: C.dim, label: t('done') }
+  : s.orphan ? { glyph: G.stuck, color: C.dead, label: t('orphan — nothing is running it any more') }
   : s.silent ? { glyph: G.stuck, color: C.dead, label: t('silent for {0}', ago(s.ageMs < Infinity ? s.ageMs : Date.now() - s.started)) }
   : s.bg ? { glyph: G.waiting, color: C.hold, label: s.ageMs > 120_000 && s.ageMs < Infinity ? t('background, silent for {0}', ago(s.ageMs)) : t('background') }
   : { glyph: G.running, color: C.run, label: t('running') };
@@ -169,7 +170,8 @@ function subBox(g: Grid, n: SubNode, r: Rect, on: boolean, src: boolean) {
   g.frame(r, fit(`${G.sub} ${s.name}`, Math.max(4, r.w - 6)), on ? C.link : C.inkHi, on ? C.link : C.frame);
   const st = subState(s);
   const right = s.tokens ? tok(s.tokens) : '';
-  const what = !s.done && !s.bg && !s.error && !s.silent && s.now ? s.now : st.label;
+  const quiet = !s.done && s.ageMs > 60_000 && s.ageMs < Infinity ? `  ${ago(s.ageMs)}` : '';   // a subagent writes a line per step: silence is worth seeing
+  const what = !s.done && !s.bg && !s.error && !s.silent && !s.orphan && s.now ? s.now + quiet : st.label;
   g.put(r.x + 2, r.y + 1, pad(`${st.glyph} ${what}`, Math.max(1, inner - (right ? right.length + 2 : 0))), st.color);
   if (right) g.put(r.x + 2 + inner - right.length, r.y + 1, right, C.frame);
   g.hit(n.id, r);

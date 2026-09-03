@@ -415,7 +415,7 @@ export async function view(p: Project): Promise<View> {
     if (!a.session) continue;
     if (waiting.has(a.name)) a.session = { ...a.session, state: 'waiting' };
     const subs = await subagentsOfSession(a.session.path, a.session.bytes).catch(() => [] as Subagent[]);
-    const live = subs.filter((s) => !s.done && !s.silent);
+    const live = subs.filter((s) => !s.done && !s.silent && !s.orphan);
     if (!live.length && a.session.ageMs > 3600_000 && !subs.some((s) => !s.done)) continue;   // an old, finished turn: its subagents are history
     for (const s of subs) { const id = `sub-${s.id}`; nodes.push({ kind: 'sub', id, sub: s, agent: a.id }); edges.push({ from: a.id, to: id, kind: 'sub' }); }
     if (live.length && a.session.state !== 'waiting') {

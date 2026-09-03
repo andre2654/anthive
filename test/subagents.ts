@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 const claude = await mkdtemp(join(tmpdir(), 'anthive-claude-'));
 process.env.ANTHIVE_CLAUDE_PROJECTS = claude;
 const cwd = await mkdtemp(join(tmpdir(), 'anthive-repo-'));
+const SID = '11111111-2222-4333-8444-555555555555';
+process.env.ANTHIVE_FAKE_PS = `claude -p --input-format stream-json --resume ${SID} --verbose`;   // the session has a live process
 const { subagentsOfSession } = await import('../src/core/subagents.ts');
 const P = await import('../src/core/project.ts');
 const A = await import('../src/core/approvals.ts');
@@ -15,7 +17,7 @@ let fails = 0;
 const must = (l: string, c: boolean) => { console.log(c ? `✓ ${l}` : `✗ ${l}`); if (!c) fails++; };
 
 // --- a transcript with an old turn and a last turn that fans out three subagents ---
-const sid = '11111111-2222-4333-8444-555555555555';
+const sid = SID;
 const dir = join(claude, '-tmp-repo'); await mkdir(dir, { recursive: true });
 const main = join(dir, `${sid}.jsonl`);
 const at = (minAgo: number) => new Date(Date.now() - minAgo * 60_000).toISOString();
@@ -94,6 +96,18 @@ const quiet = v3.nodes.find((n) => n.kind === 'sub' && n.id === 'sub-A1');
 const g3 = new Grid(130, 32); renderProject(g3, v3, null, 0, '', {});
 must('ten minutes without a line: silent, drawn as stuck', quiet?.kind === 'sub' && quiet.sub.silent && g3.toString().includes('✕ silent for 15m'));
 await utimes(sub, new Date(), new Date());
+
+// --- no process behind the session: its subagents are orphans, right away ---
+process.env.ANTHIVE_FAKE_PS = 'claude --resume 99999999-9999-4999-8999-999999999999';
+const vGone = await P.view(p);
+const orphan = vGone.nodes.find((n) => n.kind === 'sub' && n.id === 'sub-A1');
+const agentGone = vGone.nodes.find((n) => n.kind === 'agent' && n.name === 'maestro');
+const gGone = new Grid(130, 32); renderProject(gGone, vGone, null, 0, '', {});
+must('with no process holding the session the subagent is an orphan, not running', orphan?.kind === 'sub' && orphan.sub.orphan && gGone.toString().includes('✕ orphan'));
+must('and its agent stops counting as running', agentGone?.kind === 'agent' && agentGone.session?.state !== 'running');
+process.env.ANTHIVE_FAKE_PS = `claude -p --resume ${SID}`;
+const vBack = await P.view(p);
+must('with the process back it is running again', vBack.nodes.some((n) => n.kind === 'sub' && n.id === 'sub-A1' && !n.sub.orphan));
 
 // --- watching a subagent must not touch the chat that is running it ---
 const { App } = await import('../src/app.ts');

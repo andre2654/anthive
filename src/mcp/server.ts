@@ -187,7 +187,7 @@ const TOOLS: Tool[] = [
         else if (n.kind === 'note') lines.push(`- note ${n.doc.title} [note://${n.doc.id}] read by: ${n.doc.acl.join(', ') || 'nobody'}`);
         else if (n.kind === 'file') lines.push(`- file ${n.item.path}${n.item.context ? ' (context)' : ''}`);
         else if (n.kind === 'task') lines.push(`- task "${n.task.subject}" (${n.task.status})`);
-        else if (n.kind === 'sub') lines.push(`- subagent "${n.sub.name}" of ${name(n.agent)} (${n.sub.error ? 'failed' : n.sub.done ? 'done' : n.sub.silent ? 'silent' : n.sub.bg ? 'background' : 'running'})`);
+        else if (n.kind === 'sub') lines.push(`- subagent "${n.sub.name}" of ${name(n.agent)} (${n.sub.error ? 'failed' : n.sub.done ? 'done' : n.sub.orphan ? 'orphan' : n.sub.silent ? 'silent' : n.sub.bg ? 'background' : 'running'})`);
         else if (n.kind === 'browser') lines.push(`- browser${n.state.url ? ` em ${n.state.url}` : ' (no page yet)'} — browser_* tools if you are linked to it`);
         else lines.push(`- service ${n.item.name}${n.item.port ? ` :${n.item.port}` : ''} pid ${n.item.pid}${n.alive ? '' : ' (dead)'}`);
       }
