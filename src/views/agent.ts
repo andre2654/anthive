@@ -58,7 +58,8 @@ const RESEARCH: Record<string, string> = { WebSearch: 'search', WebFetch: 'fetch
 export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), width = 60, showThinking = false, agentName = ''): Row[] {
   const out: Row[] = [];
   let turnId: string | null = null, pending: Child[] = [];
-  const lastTurn = [...evs].reverse().find((e) => e.role === 'user' && !e.tool && e.text && !e.sidechain)?.uuid ?? null;
+  const isHarness = (e: Ev) => e.role === 'user' && !e.tool && !e.meta && /^\s*<(task-notification|system-reminder|local-command-stdout|local-command-caveat)/.test(e.full ?? e.text ?? '');
+  const lastTurn = [...evs].reverse().find((e) => e.role === 'user' && !e.tool && e.text && !e.sidechain && !e.meta && !isHarness(e))?.uuid ?? null;
   const flush = () => {
     const live = turnId === lastTurn;
     pending = pending.filter((c, i) => !c.thinking || (live && i === pending.length - 1));
@@ -101,11 +102,14 @@ export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), wid
     const indent = e.sidechain ? 1 : 0;
     if (e.isCompact) { flush(); out.push({ kind: 'compact', turn: null, connector: '', glyph: G.cut, gc: C.hold, name: t('COMPACTION'), nc: C.hold, detail: e.text || t('context compacted'), dc: C.dim, right: '', ts: e.ts, showTime: true }); out.push(BLANK); continue; }
     if (e.type === 'system') continue;
-    if (e.role === 'user' && e.meta) {
+    const harness = e.role === 'user' && !e.tool && !e.meta && /^\s*<(task-notification|system-reminder|local-command-stdout|local-command-caveat)/.test(e.full ?? e.text ?? '');
+    if (e.role === 'user' && (e.meta || harness)) {
       // conteúdo que o Claude Code injetou (skill carregada, lembrete de sistema): mostra o que foi, numa linha
       const m = /Base directory for this skill:\s*\S*\/([^\/\s]+)\s*$/m.exec(e.full ?? e.text ?? '');
-      const what = m ? `skill ${m[1]}` : t('injected context');
-      pending.push({ glyph: G.tool, gc: C.hold, name: what.split(' ')[0]!, nc: C.hold, detail: m ? `${m[1]} ${t('loaded')} — ${(e.text ?? '').split('#')[1]?.trim().slice(0, 60) ?? ''}` : (e.text ?? '').slice(0, 80), dc: C.dim, right: '', indent, tool: what, out: 0 });
+      const kind = /<task-notification/.test(e.full ?? e.text ?? '') ? t('notification') : t('injected context');
+      const what = m ? `skill ${m[1]}` : kind;
+      const summ = /<summary>([\s\S]*?)<\/summary>/.exec(e.full ?? e.text ?? '')?.[1]?.replace(/\s+/g, ' ').trim();
+      pending.push({ glyph: G.tool, gc: C.hold, name: what.split(' ')[0]!, nc: C.hold, detail: m ? `${m[1]} ${t('loaded')} — ${(e.text ?? '').split('#')[1]?.trim().slice(0, 60) ?? ''}` : (summ ?? e.text ?? '').slice(0, 200), dc: C.dim, right: '', indent, tool: what, out: 0 });
       continue;
     }
     if (e.sidechain && e.role === 'user' && !e.tool) {
@@ -129,7 +133,8 @@ export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), wid
       const sub = e.tool === 'Agent' || e.tool === 'Task' || e.tool === 'Explore';
       const split = splitTool(e.text ?? e.tool, e.tool, cwd);
       const research = RESEARCH[e.tool];   // search/fetch/hive: purple like subagents, short enough for the name column
-      const name = research ?? split.name, detail = split.detail;
+      const bg = sub && (e.input as Record<string, unknown> | undefined)?.run_in_background === true;   // dies with the process: worth seeing
+      const name = research ?? split.name, detail = bg ? `${t('background')} ${G.h} ${split.detail}` : split.detail;
       const editable = e.tool === 'Edit' || e.tool === 'MultiEdit' || e.tool === 'Write';
       const bt = browserTool(e.tool);
       if (bt) {
@@ -139,7 +144,7 @@ export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), wid
         pending.push({ glyph: '▣', gc: C.run, name: browserShort(bt), nc: C.ink, detail: what, dc: C.dim, right, indent, tool: e.tool, out: e.usage?.output ?? 0, ev: e.uuid });
         continue;
       }
-      pending.push({ glyph: sub ? G.sub : G.tool, gc: sub || research ? C.link : editable ? C.run : C.frame, name, nc: sub || research ? C.link : editable ? C.ink : C.dim, detail: editable ? `${detail}  ${G.h}  ↵ diff` : detail, dc: C.dim, right, indent, tool: name, out: e.usage?.output ?? 0, ev: e.uuid });
+      pending.push({ glyph: sub ? G.sub : G.tool, gc: bg ? C.hold : sub || research ? C.link : editable ? C.run : C.frame, name, nc: bg ? C.hold : sub || research ? C.link : editable ? C.ink : C.dim, detail: editable ? `${detail}  ${G.h}  ↵ diff` : detail, dc: C.dim, right, indent, tool: name, out: e.usage?.output ?? 0, ev: e.uuid });
     } else if (e.text) pending.push({ glyph: ' ', gc: C.frame, name: '', nc: C.dim, detail: e.text, dc: C.ink, right, indent, out: e.usage?.output ?? 0, thinking: e.text === 'pensando', full: e.full });
   }
   flush();

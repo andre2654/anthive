@@ -23,6 +23,7 @@ export const SYSTEM_PREAMBLE = [
   'note_write (creates a note already linked to you), note_read, notes_list, project_map, project_search (searches the notes, the conversations and the transcripts of the agents of your project), send_message, inbox, thread_read, thread_post, thread_conclude, agents_list.',
   'When the user asks you to create a note, link to something, see the project or talk to another agent, use these tools.',
   'Do not use skills or CLIs from other agent canvases for this — they are not active in this session.',
+  'Subagents (the Agent tool) must always run with run_in_background: false: this session can be restarted at any time and background agents die with the process, with nothing delivered. If a notification says background agents were stopped or lost, do not try to resume them with SendMessage — say plainly that the work did not happen and redo it synchronously.',
 ].join(' ');
 
 /** How the agent is told to drive the browser: snapshot first, refs as selectors, screenshot only to see layout. */

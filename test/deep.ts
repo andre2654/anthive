@@ -95,5 +95,12 @@ const yRow = vrows.findIndex((r) => r.voice === 'you'), aRow = vrows.findIndex((
 must('your line sits on a band', !!g3.cell(20, 3 + yRow).bg);
 must('the agent line has the bar and the name', g3.toString().split('\n')[3 + aRow]!.includes('▎resposta') && g3.toString().split('\n')[3 + aRow]!.includes('api'));
 
+// --- harness notifications are not your words; background subagents are flagged
+const nevs = [ev({ type: 'user', role: 'user', text: 'go', full: 'go' }), ev({ text: 'Agent research', tool: 'Agent', input: { description: 'research', run_in_background: true } }), ev({ type: 'user', role: 'user', text: '<task-notification> <task-id>x</task-id> <summary>No completion record was found for 4 background agents.</summary> </task-notification>', full: '<task-notification>\n<task-id>x</task-id>\n<summary>No completion record was found for 4 background agents.</summary>\n</task-notification>' }), ev({ type: 'user', role: 'user', text: 'continue', full: 'continue' }), ev({ text: 'ok', full: 'ok' })];
+const nrows = rows(nevs, '', new Set(), 80, false, 'api');
+must('a task notification renders as injected, with its summary, not as a turn', nrows.filter((r) => r.kind === 'turn').length === 2 && nrows.some((r) => r.name === 'notification' && r.detail.includes('No completion record')));
+must('a background subagent is flagged', nrows.some((r) => r.name === 'Agent' && r.detail.startsWith('background')));
+must('the bus preamble forbids background subagents', /run_in_background: false/.test(SYSTEM_PREAMBLE) && /SendMessage/.test(SYSTEM_PREAMBLE));
+
 console.log(fails ? `\n${fails} failure(s)` : '\nall green');
 process.exit(fails ? 1 : 0);
