@@ -17,6 +17,7 @@ import { Session, Ev, listSessions, sessionById, parseSession, PROJECTS } from '
 import { Task, tasksOfSession } from './tasks.ts';
 import { Subagent, subagentsOfSession } from './subagents.ts';
 import { pending } from './approvals.ts';
+import { sessionGone } from './procs.ts';
 import { SYSTEM_PREAMBLE, BROWSER_PREAMBLE } from './chat.ts';
 import { BrowserMode, freePort, isUp, pages, pickPage, findChrome, launchChrome, waitUp, closeChrome as cdpClose } from './cdp.ts';
 import { t } from '../i18n.ts';
@@ -414,6 +415,10 @@ export async function view(p: Project): Promise<View> {
   for (const a of nodes.filter((n): n is AgentNode => n.kind === 'agent')) {
     if (!a.session) continue;
     if (waiting.has(a.name)) a.session = { ...a.session, state: 'waiting' };
+    else if (a.session.state === 'running' && await sessionGone(basename(a.session.path, '.jsonl'))) {
+      // nothing holds this session: a tool with no result means the turn was cut, not that it is working
+      a.session = { ...a.session, state: a.session.pendingTool ? 'stuck' : 'idle' };
+    }
     const subs = await subagentsOfSession(a.session.path, a.session.bytes).catch(() => [] as Subagent[]);
     const live = subs.filter((s) => !s.done && !s.silent && !s.orphan);
     if (!live.length && a.session.ageMs > 3600_000 && !subs.some((s) => !s.done)) continue;   // an old, finished turn: its subagents are history
