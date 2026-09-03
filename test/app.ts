@@ -198,12 +198,23 @@ const mark = 'marcaselecao';
 app.evs.push({ uuid: 'sel-1', parent: null, sidechain: false, type: 'assistant', ts: Date.now(), role: 'assistant', text: mark, full: mark } as any);
 (app as any).rebuild(true); app.render();
 must('no new frame is drawn while selecting', !app.grid.toString().includes(mark));
+must('the frozen frame drops the frame, the gutter and the panel', (() => {
+  const lines = app.grid.toString().split('\n');
+  return !lines.some((l) => l.includes('│') || l.includes('▎') || l.includes('╭'));
+})());
 type(app, 'i');
 must('other keys do nothing while selecting', !app.composing && app.selecting);
 press(app, 'esc');
 must('esc gives the mouse back to the app', !app.selecting);
 app.render();
 must('and the screen paints again', app.grid.toString().includes(mark));
+
+// --- y copies the message under the cursor, Y the whole turn ---
+app.aCursor = app.rowsAll.findIndex((r) => r.ev === 'sel-1');
+type(app, 'y');
+must('y copies just that message', app.status.includes('message copied') || app.status.includes('pbcopy'));
+type(app, 'Y');
+must('Y copies the whole turn', app.status.includes('turn copied') || app.status.includes('nothing to copy') || app.status.includes('pbcopy'));
 press(app, 'esc'); await settle();
 must('esc volta ao projeto', app.view === 'project');
 press(app, 'esc'); await settle();

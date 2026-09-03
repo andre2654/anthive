@@ -27,7 +27,7 @@ app.view = 'agent'; app.agent = agent as any; app.pv = v;
 const ev = (o: Partial<Ev>): Ev => ({ uuid: crypto.randomUUID(), parent: null, sidechain: false, type: 'assistant', ts: 1, role: 'assistant', text: '', ...o });
 app.evs = [ev({ type: 'user', role: 'user', text: 'troque bar por baz', full: 'troque bar por baz' }), ev({ text: 'Edit /tmp/a.ts', tool: 'Edit', input: { file_path: '/tmp/a.ts', old_string: 'bar()', new_string: 'baz()' } })];
 (app as any).rebuild(true);
-app.aCursor = app.rowsAll.findIndex((r) => r.ev);
+app.aCursor = app.rowsAll.findIndex((r) => r.ev && app.evs.find((e) => e.uuid === r.ev)?.tool === 'Edit');
 must('linha de Edit está marcada com ↵ diff', app.aCursor >= 0 && app.rowsAll[app.aCursor]!.detail.includes('↵ diff'));
 app.key({ k: 'enter' } as Key);
 must('↵ abre o diff', (app.view as string) === 'diff' && app.diffEv?.tool === 'Edit');

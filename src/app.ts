@@ -12,7 +12,7 @@ import { supportsKittyGraphics, placeImage, clearImages } from './tui/image.ts';
 import { LiveView } from './core/live.ts';
 import { BrowserMode, fitImage, toPage, inBox } from './core/cdp.ts';
 import { modeLabel } from './views/item.ts';
-import { renderAgent, rows, Row, INPUT_H, LinkChip, detailWidth, tasksFrom, PanelData, panelFits, inputLayout, SubChip } from './views/agent.ts';
+import { renderAgent, rows, Row, INPUT_H, LinkChip, detailWidth, tasksFrom, PanelData, panelFits, inputLayout, SubChip, renderPlain } from './views/agent.ts';
 import * as P from './core/project.ts';
 import * as A from './core/approvals.ts';
 import * as store from './core/store.ts';
@@ -468,16 +468,27 @@ export class App {
   }
 
   /** y: copia o turno sob o cursor (o que você disse, ou o que ele respondeu) para o clipboard. */
+  /** y: the message under the cursor, as it was written. Falls back to the whole turn. */
+  copyRow() {
+    const r = this.rowsAll[this.aCursor];
+    const e = r?.ev ? this.evs.find((x) => x.uuid === r.ev) : null;
+    const text = e ? (e.full ?? (e.tool ? `${e.tool} ${e.text ?? ''}`.trim() : e.text) ?? '') : '';
+    if (!text.trim()) return this.copyTurn();
+    this.toClipboard(text, t('message'));
+  }
+  private toClipboard(text: string, what: string) {
+    try {
+      const p = Bun.spawn(['pbcopy'], { stdin: 'pipe' }); p.stdin.write(text); p.stdin.end();
+      this.say(t('{0} copied — {1} characters', what, [...text].length));
+    } catch { this.say(t('pbcopy not available')); }
+  }
   copyTurn() {
     const r = this.rowsAll[this.aCursor] ?? this.rowsAll[this.rowsAll.length - 2];
     const turn = r?.turn; if (!turn) { this.say(t('nothing to copy here')); return; }
     const i = this.evs.findIndex((e) => e.uuid === turn);
     const chunk = this.evs.slice(i).filter((e, k) => k === 0 || (e.role === 'assistant' && !e.tool && e.full && this.evs.slice(i + 1, i + k).every((x) => !(x.role === 'user' && !x.tool && !x.meta && !x.sidechain))));
     const text = chunk.map((e) => (e.role === 'user' ? `> ${e.full ?? e.text}` : e.full ?? e.text)).join('\n\n');
-    try {
-      const p = Bun.spawn(['pbcopy'], { stdin: 'pipe' }); p.stdin.write(text); p.stdin.end();
-      this.say(`copiado: ${[...text].length} caracteres`);
-    } catch { this.say(t('pbcopy not available')); }
+    this.toClipboard(text, t('turn'));
   }
   /**
    * s: the terminal takes the mouse back so you can select and copy with it.
@@ -491,6 +502,18 @@ export class App {
     this.render();
     this.selecting = true;
     this.screen.setMouse(false);
+    if (this.view === 'agent') this.paintPlain();
+  }
+
+  /** The frozen frame for the agent view: the text alone, wrapped to the whole screen, so a copy brings text and nothing else. */
+  private paintPlain() {
+    const rowsWide = rows(this.evs, this.agent?.cwd ?? '', this.expanded, Math.max(8, this.grid.W - 12), this.showThinking, this.agent?.name ?? '');
+    const at = this.rowsAll[this.aScroll]?.ev ?? this.rowsAll[this.aScroll]?.turn ?? null;   // keep the eye where it was
+    const scroll = at ? Math.max(0, rowsWide.findIndex((r) => (r.ev ?? r.turn) === at)) : Math.max(0, rowsWide.length - (this.grid.H - 1));
+    this.grid.clear();
+    renderPlain(this.grid, rowsWide, scroll, this.agent?.name ?? '', t('select and copy with the mouse — s or esc returns'));
+    this.screen.write('\x1b[2J' + this.grid.diff(null));
+    this.prev = null;   // the next real frame repaints everything
   }
 
   /** The transcript open is a subagent's: it is watched, never talked to. */
@@ -772,7 +795,8 @@ export class App {
           else if (k.c === 'l' && this.agent) this.pickLinkTarget(this.agent.id);
           else if (k.c === 'x') this.closeChat();
           else if (k.c === 't') { this.showThinking = !this.showThinking; this.rebuild(false); this.say(this.showThinking ? t('thinking shown') : t('thinking hidden')); }
-          else if (k.c === 'y') this.copyTurn();
+          else if (k.c === 'y') this.copyRow();
+          else if (k.c === 'Y') this.copyTurn();
           else if (k.c === ']') { this.showPanel = !this.showPanel; this.rebuild(false); }
           else if (k.c === 'g') { this.aScroll = 0; this.aCursor = 0; } else if (k.c === 'G') { this.aScroll = max; this.aCursor = -1; }
         }

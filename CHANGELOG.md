@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- In selection mode the agent's transcript is redrawn plain: no frame, no gutter, no side panel, wrapped to the whole width, so what the terminal copies is the text alone. `y` now copies the message under the cursor and `Y` the whole turn.
 - `s` hands the mouse back to the terminal so you can select and copy with it, and freezes the frame while you do (a redraw would move the text under the selection). `s` or `esc` returns. `y` still copies the whole turn under the cursor.
 
 - Subagents on the map: the Agent calls of an agent's current turn hang under it as boxes with the description, what each one is doing (read from the files Claude Code keeps per subagent), tokens so far and state (running, done, failed, background, and silent when nothing was written for ten minutes: the process that ran it is gone). `↵` opens one as a read-only transcript that follows it live; the panel shows its brief. `project_map` lists them.

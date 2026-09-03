@@ -92,8 +92,8 @@ export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), wid
         // resposta em markdown: títulos, listas, código e ênfase viram cor
         const md = renderMd(c.full ?? c.detail, width);
         const first = md[0];
-        out.push({ kind: 'child', turn: turnId, connector: conn, glyph: c.glyph, gc: c.gc, name: agentName || c.name, nc: agentName ? C.link : c.nc, detail: first ? first.spans.map((x) => x.text).join('') : '', dc: c.dc, right: c.right, ts: 0, showTime: false, voice: 'agent', spans: first?.spans });
-        for (const l of md.slice(1)) out.push({ kind: 'cont', turn: turnId, connector: stem, glyph: '', gc: C.frame, name: '', nc: C.frame, detail: l.spans.map((x) => x.text).join(''), dc: c.dc, right: '', ts: 0, showTime: false, voice: 'agent', spans: l.spans });
+        out.push({ kind: 'child', turn: turnId, connector: conn, glyph: c.glyph, gc: c.gc, name: agentName || c.name, nc: agentName ? C.link : c.nc, detail: first ? first.spans.map((x) => x.text).join('') : '', dc: c.dc, right: c.right, ts: 0, showTime: false, voice: 'agent', spans: first?.spans, ev: c.ev });
+        for (const l of md.slice(1)) out.push({ kind: 'cont', turn: turnId, connector: stem, glyph: '', gc: C.frame, name: '', nc: C.frame, detail: l.spans.map((x) => x.text).join(''), dc: c.dc, right: '', ts: 0, showTime: false, voice: 'agent', spans: l.spans, ev: c.ev });
       }
     }
     out.push(BLANK); pending = [];
@@ -121,8 +121,8 @@ export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), wid
       if (!e.text) continue;
       flush(); turnId = e.uuid;
       const ls = wrap(e.full ?? e.text, width);
-      out.push({ kind: 'turn', turn: e.uuid, connector: '', glyph: G.running, gc: C.run, name: t('you'), nc: C.run, detail: ls[0]!, dc: C.inkHi, right: '', ts: e.ts, showTime: true, voice: 'you' });
-      for (const l of ls.slice(1)) out.push({ kind: 'cont', turn: e.uuid, connector: '', glyph: '', gc: C.frame, name: '', nc: C.frame, detail: l, dc: C.inkHi, right: '', ts: 0, showTime: false, voice: 'you' });
+      out.push({ kind: 'turn', turn: e.uuid, connector: '', glyph: G.running, gc: C.run, name: t('you'), nc: C.run, detail: ls[0]!, dc: C.inkHi, right: '', ts: e.ts, showTime: true, voice: 'you', ev: e.uuid });
+      for (const l of ls.slice(1)) out.push({ kind: 'cont', turn: e.uuid, connector: '', glyph: '', gc: C.frame, name: '', nc: C.frame, detail: l, dc: C.inkHi, right: '', ts: 0, showTime: false, voice: 'you' , ev: e.uuid });
       continue;
     }
     const right = e.usage?.output ? tok(e.usage.output) : '';
@@ -145,7 +145,7 @@ export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), wid
         continue;
       }
       pending.push({ glyph: sub ? G.sub : G.tool, gc: bg ? C.hold : sub || research ? C.link : editable ? C.run : C.frame, name, nc: bg ? C.hold : sub || research ? C.link : editable ? C.ink : C.dim, detail: editable ? `${detail}  ${G.h}  ↵ diff` : detail, dc: C.dim, right, indent, tool: name, out: e.usage?.output ?? 0, ev: e.uuid });
-    } else if (e.text) pending.push({ glyph: ' ', gc: C.frame, name: '', nc: C.dim, detail: e.text, dc: C.ink, right, indent, out: e.usage?.output ?? 0, thinking: e.text === 'pensando', full: e.full });
+    } else if (e.text) pending.push({ glyph: ' ', gc: C.frame, name: '', nc: C.dim, detail: e.text, dc: C.ink, right, indent, out: e.usage?.output ?? 0, thinking: e.text === 'pensando', full: e.full, ev: e.uuid });
   }
   flush();
   const last = evs[evs.length - 1];
@@ -223,6 +223,28 @@ function drawPanel(g: Grid, x: number, top: number, bottom: number, p: PanelData
   y++;
   head(t('now'));
   line(p.state, C.ink);
+}
+
+/**
+ * The transcript with nothing around it: no frame, no gutter, no panel, no
+ * columns. What the terminal copies is the text itself, which is the point of
+ * the selection mode.
+ */
+export function renderPlain(g: Grid, all: Row[], scroll: number, name: string, hint: string) {
+  const { W, H } = g;
+  g.put(0, 0, fit(`${name}  ${G.h}  ${hint}`, W), C.frame);
+  const slice = all.slice(scroll, scroll + H - 1);
+  for (let i = 0; i < slice.length; i++) {
+    const r = slice[i]!, y = i + 1;
+    if (r.kind === 'blank' || r.kind === 'now') continue;
+    const lead = r.voice === 'you' && r.name ? '> ' : '';
+    let x = 0;
+    if (r.name && r.voice !== 'you') { g.put(0, y, fit(`${r.name}: `, W), r.nc); x = [...r.name].length + 2; }
+    else if (lead) { g.put(0, y, lead, C.frame); x = lead.length; }
+    else if (r.glyph && !r.voice) { g.put(0, y, `${r.glyph} `, r.gc); x = 2; }
+    if (r.spans) { for (const sp of r.spans) { if (x >= W) break; g.put(x, y, fit(sp.text, W - x), sp.color); x += [...sp.text].length; } }
+    else g.put(x, y, fit(r.detail, Math.max(0, W - x)), r.dc);
+  }
 }
 
 /** Altura da caixa de escrita no rodapé: 3 linhas quando aberta, 1 quando fechada. */
@@ -315,6 +337,6 @@ export function renderAgent(
   keybar(g, H - 2, input
     ? [['↵', input.deep ? t('research') : t('send')], ['tab', input.deep ? t('plain turn') : t('deep search')], ['esc', t('leave the field')]]
     : watching
-    ? [['↑↓', t('navigate')], ['↵', t('turn')], ['t', t('thoughts')], ['y', t('copy turn')], ['s', t('select')], ['esc', t('project')]]
-    : [['i', t('write')], ['D', t('deep')], ['↑↓', t('navigate')], ['↵', t('turn')], ['t', t('thoughts')], ['y', t('copy turn')], ['s', t('select')], ['m', t('model')], ['e', t('effort')], ['p', t('permissions')], ['l', t('link')], ...(live ? ([['x', t('stop chat')]] as [string, string][]) : []), ['esc', t('project')]], status);
+    ? [['↑↓', t('navigate')], ['↵', t('turn')], ['t', t('thoughts')], ['y', t('copy')], ['s', t('select')], ['esc', t('project')]]
+    : [['i', t('write')], ['D', t('deep')], ['↑↓', t('navigate')], ['↵', t('turn')], ['t', t('thoughts')], ['y', t('copy')], ['s', t('select')], ['m', t('model')], ['e', t('effort')], ['p', t('permissions')], ['l', t('link')], ...(live ? ([['x', t('stop chat')]] as [string, string][]) : []), ['esc', t('project')]], status);
 }
