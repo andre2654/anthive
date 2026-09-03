@@ -8,7 +8,7 @@
 import { join } from 'node:path';
 import { stat } from 'node:fs/promises';
 import * as store from './store.ts';
-import { PROJECTS, describe, sessionById, listSessions } from './sessions.ts';
+import { PROJECTS, sessionById, listSessions } from './sessions.ts';
 import { Project, Graph, claudeSlug, loadGraph } from './project.ts';
 
 export type Scope = 'all' | 'notes' | 'threads' | 'transcripts';
@@ -16,8 +16,8 @@ export interface Matcher { label: string; any: RegExp; all: RegExp[] }
 export interface Hit { kind: 'note' | 'thread' | 'transcript'; source: string; author: string; ts: number; where: string; context: string; score: number }
 export interface SearchResult { hits: Hit[]; counts: { notes: number; threads: number; transcripts: number }; scanned: number; bytes: number }
 
-export const TAIL_CAP = 32 * 1024 * 1024;   // per transcript: the newest 32 MB
-const MAX_TRANSCRIPTS = 12, PER_SOURCE = 6, DEFAULT_LIMIT = 20, MAX_LIMIT = 60;
+export const TAIL_CAP = 128 * 1024 * 1024;   // per transcript: the newest 128 MB
+const MAX_TRANSCRIPTS = 40, PER_SOURCE = 15, DEFAULT_LIMIT = 40, MAX_LIMIT = 200;
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** `/re/` → one case-insensitive regex; anything else → every word must match (up to 8), case-insensitive. Throws on empty or invalid. */
@@ -26,11 +26,11 @@ export function matcher(query: string): Matcher {
   if (!q) throw new Error('empty query');
   const re = /^\/(.+)\/[a-z]*$/s.exec(q);
   if (re) return { label: q, any: new RegExp(re[1]!, 'i'), all: [new RegExp(re[1]!, 'i')] };
-  const words = q.split(/\s+/).filter(Boolean).slice(0, 8);
+  const words = q.split(/\s+/).filter(Boolean).slice(0, 16);
   return { label: q, any: new RegExp(words.map(esc).join('|'), 'i'), all: words.map((w) => new RegExp(esc(w), 'i')) };
 }
 
-const clip = (line: string, m: Matcher, max = 200) => {
+const clip = (line: string, m: Matcher, max = 300) => {
   const l = line.trim();
   if (l.length <= max) return l;
   const at = Math.max(0, l.search(m.all[0]!));
@@ -82,13 +82,29 @@ export function searchJsonl(jsonl: string, agent: string, m: Matcher): Hit[] {
     const ts = Date.parse(String(o.timestamp ?? '')) || 0;
     const push = (where: string, text: string) => { const r = searchText(text, m); if (!r) return false; out.push({ kind: 'transcript', source: `agent ${agent}`, author: agent, ts, where: o.isSidechain || o.parent_tool_use_id ? `${where} (subagent)` : where, context: r.context, score: Math.min(r.count, 5) + recency(ts) }); return true; };
     if (type === 'summary') { push('summary', String(o.summary ?? '')); continue; }
-    const d = describe(o);
-    const role = o.message?.role ?? type;
-    const said = d.full ?? d.text;
-    if (said && push(d.tool ? d.tool : role === 'user' ? 'you' : 'text', said)) continue;
-    if (d.thinking && push('thinking', d.thinking)) continue;
-    if (d.input && push(`${d.tool ?? 'tool'} input`, JSON.stringify(d.input))) continue;
-    if (d.result) push('tool result', d.result);
+    // every block of the message, uncapped — the screen truncates tool results and inputs, a search must not
+    for (const [where, text] of blocksOf(o)) if (push(where, text)) break;
+  }
+  return out;
+}
+
+/** [where, text] for every block of a transcript message: user text, assistant text, thinking, tool inputs (full JSON) and tool results (full). */
+export function blocksOf(o: any): [string, string][] {
+  const role: string = o.message?.role ?? o.type;
+  const c = o.message?.content;
+  if (typeof c === 'string') return c ? [[role === 'user' ? 'you' : 'text', c]] : [];
+  if (!Array.isArray(c)) return [];
+  const out: [string, string][] = [];
+  for (const b of c) {
+    if (!b || typeof b !== 'object') continue;
+    if (b.type === 'text' && b.text) out.push([role === 'user' ? 'you' : 'text', String(b.text)]);
+    else if (b.type === 'thinking' && b.thinking) out.push(['thinking', String(b.thinking)]);
+    else if (b.type === 'tool_use') out.push([`${b.name ?? 'tool'} input`, JSON.stringify(b.input ?? {})]);
+    else if (b.type === 'tool_result') {
+      const parts = Array.isArray(b.content) ? b.content : typeof b.content === 'string' ? [{ type: 'text', text: b.content }] : [];
+      const text = parts.filter((x: any) => x?.type === 'text').map((x: any) => String(x.text)).join('\n');
+      if (text) out.push(['tool result', text]);
+    }
   }
   return out;
 }
@@ -114,7 +130,7 @@ export async function projectTranscripts(p: Project, g: Graph): Promise<{ agent:
     if (!st) { const s = await sessionById(it.sessionId); if (s) { path = s.path; st = await stat(path).catch(() => null); } }
     if (st) out.set(path, { agent: it.name, path, mtime: st.mtimeMs });
   }
-  for (const s of await listSessions(24, p.cwd)) {
+  for (const s of await listSessions(60, p.cwd)) {
     if (out.size >= MAX_TRANSCRIPTS) break;
     if (!out.has(s.path)) out.set(s.path, { agent: `session ${s.id}`, path: s.path, mtime: Number(s.mtime) || 0 });
   }

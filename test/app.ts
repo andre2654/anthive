@@ -123,7 +123,7 @@ const waitFor = async (pred: () => boolean, ms = 4000) => { const t0 = Date.now(
 type(app, 'i'); await settle();
 must('i opens the box and spawns a plain chat', (await waitFor(() => argvLines().length === 1)) && app.composing && !!app.chat && !argvLines()[0]!.includes('WebSearch'));
 press(app, 'tab');
-must('tab turns the chip on and restarts once with the web tools and xhigh', app.deep && (await waitFor(() => argvLines().length === 2)) && argvLines()[1]!.includes('WebSearch') && argvLines()[1]!.includes('--forward-subagent-text') && argvLines()[1]!.includes('--effort xhigh'));
+must('tab turns the chip on and restarts once with the web tools and effort max', app.deep && (await waitFor(() => argvLines().length === 2)) && argvLines()[1]!.includes('WebSearch') && argvLines()[1]!.includes('--forward-subagent-text') && argvLines()[1]!.includes('--effort max'));
 await sleep(300);
 must('the old process exiting did not close the chat', !!app.chat && app.composing);
 app.render();
