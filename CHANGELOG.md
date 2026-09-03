@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Subagents on the map: the Agent calls of an agent's current turn hang under it as boxes with the description, what each one is doing (read from the files Claude Code keeps per subagent), tokens so far and state (running, done, failed, background, and silent when nothing was written for ten minutes: the process that ran it is gone). `↵` opens one as a read-only transcript that follows it live; the panel shows its brief. `project_map` lists them.
+- Fixed: opening a subagent's transcript killed the chat that was running it (it looked like switching agents). Watching is read-only now: no input box, the parent's events stay in the parent's tree, and the chat keeps running.
 - Mid-turn guards: `x` and `q` ask before killing a chat that is still answering (naming the live subagents), and `m`/`e`/`p` changes asked mid-turn wait for the answer before the restart, instead of losing the turn and its subagents.
 - The map says `approval` only for a permission request that is actually pending (`~/.anthive/approvals`); a tool without its result is `running` with the tool's name, `stuck` after ten minutes. A parent whose subagents are alive counts as running even while its own transcript sleeps.
 

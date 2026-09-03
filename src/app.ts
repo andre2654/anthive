@@ -427,6 +427,8 @@ export class App {
   async openAgent(n: P.AgentNode) {
     this.agent = n; this.view = 'agent'; this.composing = false;
     if (n.session) await this.loadTranscript(n.session); else { this.evs = []; this.lastLoadedPath = ''; this.rebuild(true); }
+    // watching a subagent is not switching agents: the parent chat (and every subagent inside it) stays alive
+    if (this.watchOnly) return;
     if (this.chat && this.chat.sessionId !== (n.session ? basename(n.session.path, '.jsonl') : n.item?.sessionId)) this.stopChat();
   }
   private chips(): LinkChip[] {
@@ -516,7 +518,7 @@ export class App {
     this.dirty = true;
   }
   private onChat(e: ChatEvent) {
-    if (e.kind === 'ev') { this.evs.push(e.ev); this.rebuild(true); }
+    if (e.kind === 'ev') { if (this.watchOnly) { this.dirty = true; return; } this.evs.push(e.ev); this.rebuild(true); }   // watching a subagent: the tree on screen is not this chat's
     else if (e.kind === 'result') {
       this.screen.write('\x07');
       if (this.pendingPatch && this.chat && !this.chat.busy) { const patch = this.pendingPatch; this.pendingPatch = null; this.chat.restart(patch); this.say(t('applied now: {0} — same session', Object.entries(patch).map(([k, v]) => `${k} ${v || t('default')}`).join(', ')), 5000); }
@@ -794,7 +796,7 @@ export class App {
     else if (this.view === 'agent' && this.agent) {
       const lay = inputLayout(this.grid.W, this.deep);
     const w = this.composing ? this.chatInput.window(lay.w) : null;
-      renderAgent(g, this.agent, this.agent.session, this.evs, this.rowsAll, this.aScroll, this.aCursor, this.status, w ? { text: w.text, cursor: w.cursorAt, deep: this.deep } : null, this.live, this.chips(), this.panelData());
+      renderAgent(g, this.agent, this.agent.session, this.evs, this.rowsAll, this.aScroll, this.aCursor, this.status, this.watchOnly ? null : (w ? { text: w.text, cursor: w.cursorAt, deep: this.deep } : null), this.watchOnly ? null : this.live, this.chips(), this.panelData(), this.watchOnly);
     }
     else if (this.view === 'note' && this.note) renderNote(g, this.note, this.noteScroll, this.status, this.linksOf(`note-${this.note.id}`));
     else if (this.view === 'file' && this.file) renderFile(g, this.file, this.fileLines, this.fileScroll, this.status, this.linksOf(this.file.id));

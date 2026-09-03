@@ -215,7 +215,7 @@ export function inputLayout(W: number, deep: boolean): { x: number; w: number; h
 export function renderAgent(
   g: Grid, n: AgentNode, s: Session | null, evs: Ev[], all: Row[], scroll: number, cursorRow: number,
   status: string, input: { text: string; cursor: number; deep?: boolean } | null, live: Live | null, chips: LinkChip[],
-  panel: PanelData | null = null,
+  panel: PanelData | null = null, watching = false,
 ) {
   const { W, H } = g;
   const withPanel = !!panel && panelFits(W);
@@ -284,10 +284,12 @@ export function renderAgent(
     g.cursor = { x: lay.x + input.cursor, y: by + 1 };
   } else {
     g.put(2, by, `${G.arrow} `, C.frame);
-    g.put(4, by, fit(`${t('write to {0}', n.name)}  ${G.h}  i  ${G.h}  D ${t('deep search')}`, W - 6), C.frame);
+    g.put(4, by, fit(watching ? `${t('watching {0} — its parent runs it; esc goes back', n.name)}` : `${t('write to {0}', n.name)}  ${G.h}  i  ${G.h}  D ${t('deep search')}`, W - 6), C.frame);
   }
   g.put(0, H - 3, G.teeL + G.h.repeat(W - 2) + G.teeR, C.frame);
   keybar(g, H - 2, input
     ? [['↵', input.deep ? t('research') : t('send')], ['tab', input.deep ? t('plain turn') : t('deep search')], ['esc', t('leave the field')]]
+    : watching
+    ? [['↑↓', t('navigate')], ['↵', t('turn')], ['t', t('thoughts')], ['y', t('copy')], ['esc', t('project')]]
     : [['i', t('write')], ['D', t('deep')], ['↑↓', t('navigate')], ['↵', t('turn')], ['t', t('thoughts')], ['y', t('copy')], ['m', t('model')], ['e', t('effort')], ['p', t('permissions')], ['l', t('link')], ...(live ? ([['x', t('stop chat')]] as [string, string][]) : []), ['esc', t('project')]], status);
 }

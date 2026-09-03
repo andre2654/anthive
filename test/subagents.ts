@@ -95,6 +95,29 @@ const g3 = new Grid(130, 32); renderProject(g3, v3, null, 0, '', {});
 must('ten minutes without a line: silent, drawn as stuck', quiet?.kind === 'sub' && quiet.sub.silent && g3.toString().includes('✕ silent for 15m'));
 await utimes(sub, new Date(), new Date());
 
+// --- watching a subagent must not touch the chat that is running it ---
+const { App } = await import('../src/app.ts');
+const { Screen } = await import('../src/tui/screen.ts');
+class F extends Screen { constructor() { super({ mouse: true }); this.W = 130; this.H = 30; } override measure() {} override enter() {} override restore() {} override write() {} override onKey() {} }
+const app = new App(new F());
+app.project = p; app.pv = await P.view(p); app.view = 'project';
+let stops = 0;
+app.chat = { sessionId: sid, busy: true, model: 'claude-x', effort: 'high', permissionMode: '', deep: true, thinking: 0, summary: '', cost: 0, proc: {}, stop: () => { stops++; } } as any;
+app.sel = 'sub-A1';
+await app.openSel();
+const viewNow = (): string => app.view;
+must('opening a subagent watches it without killing the chat that runs it', stops === 0 && !!app.chat && viewNow() === 'agent' && !!app.agent?.name.includes('CVM rules'));
+const before = app.evs.length;
+(app as any).onChat({ kind: 'ev', ev: { uuid: 'x', parent: null, sidechain: false, type: 'assistant', ts: 0, role: 'assistant', text: 'from the parent' } });
+must('the parent chat writes into its own transcript, not the one being watched', app.evs.length === before);
+app.render();
+const w = app.grid.toString();
+must('the view says it is read-only and offers no input', w.includes('watching') && !w.includes('write to') && !w.includes('D deep'));
+(app as any).startChat();
+must('starting a chat on a subagent is refused', stops === 0 && app.status.includes('watch only'));
+app.sel = 'sub-A1'; (app as any).removeSel();
+must('a subagent cannot be removed from the map', app.modal === null && app.status.includes('ends by itself'));
+
 // --- a pending permission request is the only "approval" ---
 void A.ask({ agent: 'maestro', project: p.id, cwd, tool: 'Bash', input: { command: 'rm -rf build' } }, { timeoutMs: 5000, pollMs: 50 });
 await new Promise((r) => setTimeout(r, 120));
