@@ -180,13 +180,14 @@ const TOOLS: Tool[] = [
       const p = await myProject();
       if (!p) return 'You are not in any Anthive project.';
       const v = await projectView(p);
-      const name = (id: string) => { const n = v.nodes.find((x) => x.id === id); return !n ? id : n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.kind === 'browser' ? 'browser' : n.item.name; };
+      const name = (id: string) => { const n = v.nodes.find((x) => x.id === id); return !n ? id : n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.kind === 'sub' ? n.sub.name : n.kind === 'browser' ? 'browser' : n.item.name; };
       const lines = [`Project ${p.name} in ${p.cwd}`];
       for (const n of v.nodes) {
         if (n.kind === 'agent') lines.push(`- agent ${n.name}${n.session ? ` (${n.session.state})` : ''}`);
         else if (n.kind === 'note') lines.push(`- note ${n.doc.title} [note://${n.doc.id}] read by: ${n.doc.acl.join(', ') || 'nobody'}`);
         else if (n.kind === 'file') lines.push(`- file ${n.item.path}${n.item.context ? ' (context)' : ''}`);
         else if (n.kind === 'task') lines.push(`- task "${n.task.subject}" (${n.task.status})`);
+        else if (n.kind === 'sub') lines.push(`- subagent "${n.sub.name}" of ${name(n.agent)} (${n.sub.error ? 'failed' : n.sub.done ? 'done' : n.sub.silent ? 'silent' : n.sub.bg ? 'background' : 'running'})`);
         else if (n.kind === 'browser') lines.push(`- browser${n.state.url ? ` em ${n.state.url}` : ' (no page yet)'} — browser_* tools if you are linked to it`);
         else lines.push(`- service ${n.item.name}${n.item.port ? ` :${n.item.port}` : ''} pid ${n.item.pid}${n.alive ? '' : ' (dead)'}`);
       }

@@ -129,7 +129,7 @@ export function describe(o: any): { text: string; tool: string | null; full?: st
 function deriveState(ageMs: number, pendingTool: string | null): State {
   const min = ageMs / 60000;
   if (min < 0.75) return 'running';
-  if (pendingTool && min < 10) return 'waiting';
+  if (pendingTool && min < 10) return 'running';   // a tool in flight (Agent, Bash, the browser); a permission prompt is marked by the map from ~/.anthive/approvals
   if (pendingTool) return 'stuck';
   if (min < 60) return 'idle';
   return 'sleeping';

@@ -11,7 +11,7 @@ import { t } from '../i18n.ts';
 export { snapshotRefs };
 import { C, G, BG, RGB, sparkline, ago, tok, pad, padStart, fit } from '../tui/theme.ts';
 import { State, windowOf } from '../core/sessions.ts';
-import { View, Node, Edge, AgentNode, TaskNode, projectName } from '../core/project.ts';
+import { View, Node, Edge, AgentNode, TaskNode, projectName, SubNode } from '../core/project.ts';
 import { threadState } from '../core/store.ts';
 import { windowOf as winOf } from '../core/sessions.ts';
 import { renderMd } from '../tui/markdown.ts';
@@ -26,10 +26,10 @@ const GLYPH: Record<State, string> = { running: G.running, waiting: G.waiting, i
 const COLOR: Record<State, RGB> = { running: C.run, waiting: C.hold, idle: C.idle, stuck: C.dead, sleeping: C.frame };
 const LABEL = (s: State) => ({ running: t('running'), waiting: t('approval'), idle: t('idle'), stuck: t('stuck'), sleeping: t('asleep') })[s];
 const SPARK: Record<State, RGB> = { running: C.sparkR, waiting: C.sparkH, idle: C.sparkI, stuck: C.sparkD, sleeping: C.sparkI };
-export const KIND_GLYPH = { agent: G.running, note: G.note, file: '▤', service: '◎', task: G.focus, browser: '▣' } as const;
+export const KIND_GLYPH = { agent: G.running, note: G.note, file: '▤', service: '◎', task: G.focus, sub: G.sub, browser: '▣' } as const;
 export const PANEL_W = 34;
 export const panelFits = (W: number) => W >= 110;
-const TASK_H = 3, BROWSER_H = 4;
+const TASK_H = 3, BROWSER_H = 4, SUB_H = 3, SUB_INDENT = 3;   // subagents hang under their agent, indented
 
 export interface Path { cells: [number, number][]; from: string; to: string }
 export interface ProjectLayout {
@@ -57,12 +57,13 @@ export function layoutProject(v: View, W: number, scroll = 0, panel = false): Pr
   const avail = W - 4 - pw;
   const agents = v.nodes.filter((n): n is AgentNode => n.kind === 'agent');
   const items = (['note', 'task', 'browser', 'file', 'service'] as const).flatMap((kind) => v.nodes.filter((x) => x.kind === kind));
-  const hOf = (n: Node) => n.kind === 'agent' ? AGENT_H : n.kind === 'note' ? NOTE_H : n.kind === 'file' ? (n.item.context ? NOTE_H : FILE_H) : n.kind === 'task' ? TASK_H : n.kind === 'browser' ? BROWSER_H : SERVICE_H;
+  const hOf = (n: Node) => n.kind === 'agent' ? AGENT_H : n.kind === 'note' ? NOTE_H : n.kind === 'file' ? (n.item.context ? NOTE_H : FILE_H) : n.kind === 'task' ? TASK_H : n.kind === 'sub' ? SUB_H : n.kind === 'browser' ? BROWSER_H : SERVICE_H;
 
   // 1) alturas primeiro: não dependem da largura da calha
   const yOf = new Map<string, number>();
   let y = 2 - scroll;
-  for (const a of agents) { yOf.set(a.id, y); y += AGENT_H + 1; }
+  const subsOf = (id: string) => v.nodes.filter((n): n is SubNode => n.kind === 'sub' && n.agent === id);
+  for (const a of agents) { yOf.set(a.id, y); y += AGENT_H; for (const s of subsOf(a.id)) { yOf.set(s.id, y); y += SUB_H; } y += 1; }
   const leftBottom = y;
   y = 2 - scroll;
   for (const n of items) { yOf.set(n.id, y); y += hOf(n) + 1; }
@@ -71,7 +72,8 @@ export function layoutProject(v: View, W: number, scroll = 0, panel = false): Pr
   // 2) faixas pelos trechos verticais das ligações que cruzam a calha.
   //    Saídas e chegadas escalonadas: a k-ésima ligação de um nó usa a k-ésima
   //    linha de conteúdo dele, então nada se empilha na mesma linha.
-  const isAgent = (id: string) => agents.some((a) => a.id === id);
+  const left = new Set(v.nodes.filter((n) => n.kind === 'agent' || n.kind === 'sub').map((n) => n.id));
+  const isAgent = (id: string) => left.has(id);
   const key = (e: Edge) => `${e.from}>${e.to}`;
   const hById = new Map(v.nodes.map((n) => [n.id, hOf(n)]));
   const outCount = new Map<string, number>(), inCount = new Map<string, number>();
@@ -98,6 +100,7 @@ export function layoutProject(v: View, W: number, scroll = 0, panel = false): Pr
   const rightW = W - 2 - rightX - pw;
   const boxes: ProjectLayout['boxes'] = [];
   for (const a of agents) boxes.push({ id: a.id, rect: { x: 2, y: yOf.get(a.id)!, w: leftW, h: AGENT_H }, node: a });
+  for (const a of agents) for (const s of subsOf(a.id)) boxes.push({ id: s.id, rect: { x: 2 + SUB_INDENT, y: yOf.get(s.id)!, w: leftW - SUB_INDENT, h: SUB_H }, node: s });
   for (const n of items) boxes.push({ id: n.id, rect: { x: rightX, y: yOf.get(n.id)!, w: rightW, h: hOf(n) }, node: n });
 
   // 4) rotas
@@ -106,6 +109,7 @@ export function layoutProject(v: View, W: number, scroll = 0, panel = false): Pr
   const paths: Path[] = [];
   const gx = 2 + leftW;
   for (const e of v.edges) {
+    if (e.kind === 'sub') continue;   // drawn as a stem next to the boxes, not as a route
     const a = rect(e.from), b = rect(e.to);
     if (!a || !b) continue;
     const cells: [number, number][] = [];
@@ -141,12 +145,33 @@ function agentBox(g: Grid, n: AgentNode, r: Rect, on: boolean, src: boolean) {
   g.put(r.x + 2 + inner - 7, r.y + 1, padStart(s ? ago(s.ageMs) : '', 7), C.frame);
   const branch = n.item?.worktree ?? (s?.branch && s.branch !== 'HEAD' ? s.branch : '');
   const doing = s?.lastText.replace(/^(\w+ )?cd \S+\s*(&&\s*)?/, '$1') ?? '';
-  const l2 = s?.state === 'waiting' || s?.state === 'stuck' ? `${G.pause} ${s.pendingTool ?? '?'}` : branch || doing || (n.item ? t('no session — ↵ opens the chat') : '');
-  g.put(r.x + 2, r.y + 2, pad(l2, inner), s?.state === 'waiting' ? C.hold : branch ? C.link : C.frame);
+  const inflight = s?.state === 'running' && s.pendingTool ? `${G.tool} ${s.pendingTool}${s.pendingInput ? ' ' + s.pendingInput : ''}` : '';
+  const l2 = s?.state === 'waiting' || s?.state === 'stuck' ? `${G.pause} ${s.pendingTool ?? '?'}` : inflight || branch || doing || (n.item ? t('no session — ↵ opens the chat') : '');
+  g.put(r.x + 2, r.y + 2, pad(l2, inner), s?.state === 'waiting' ? C.hold : inflight ? C.dim : branch ? C.link : C.frame);
   const ctx = s?.context ? `${tok(s.context)}` : '';
   const sw = Math.max(4, inner - (ctx ? ctx.length + 2 : 0));
   g.put(r.x + 2, r.y + 3, sparkline(s?.spark ?? [], sw), SPARK[state]);
   if (ctx) g.put(r.x + 2 + sw, r.y + 3, padStart(ctx, ctx.length + 2), (s!.context / windowOf(s!.model, s!.context)) > 0.85 ? C.hold : C.frame);
+  g.hit(n.id, r);
+}
+
+/** A subagent: its description as title, one line with what it is doing, tokens on the right. */
+export const subState = (s: SubNode['sub']): { glyph: string; color: RGB; label: string } =>
+  s.error ? { glyph: G.stuck, color: C.dead, label: t('failed') }
+  : s.done ? { glyph: G.idle, color: C.dim, label: t('done') }
+  : s.silent ? { glyph: G.stuck, color: C.dead, label: t('silent for {0}', ago(s.ageMs < Infinity ? s.ageMs : Date.now() - s.started)) }
+  : s.bg ? { glyph: G.waiting, color: C.hold, label: s.ageMs > 120_000 && s.ageMs < Infinity ? t('background, silent for {0}', ago(s.ageMs)) : t('background') }
+  : { glyph: G.running, color: C.run, label: t('running') };
+
+function subBox(g: Grid, n: SubNode, r: Rect, on: boolean, src: boolean) {
+  const s = n.sub, inner = r.w - 4;
+  if (on || src) g.fill(r, BG.sel);
+  g.frame(r, fit(`${G.sub} ${s.name}`, Math.max(4, r.w - 6)), on ? C.link : C.inkHi, on ? C.link : C.frame);
+  const st = subState(s);
+  const right = s.tokens ? tok(s.tokens) : '';
+  const what = !s.done && !s.bg && !s.error && !s.silent && s.now ? s.now : st.label;
+  g.put(r.x + 2, r.y + 1, pad(`${st.glyph} ${what}`, Math.max(1, inner - (right ? right.length + 2 : 0))), st.color);
+  if (right) g.put(r.x + 2 + inner - right.length, r.y + 1, right, C.frame);
   g.hit(n.id, r);
 }
 
@@ -226,7 +251,7 @@ function drawPath(g: Grid, p: Path, e: Edge, W: number, arrow = true) {
 
 export interface ProjectOpts { linkSource?: string | null; tick?: number; query?: string; panel?: boolean }
 
-const nodeName = (n: Node) => n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.kind === 'browser' ? 'browser' : n.item.name;
+const nodeName = (n: Node) => n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.kind === 'sub' ? n.sub.name : n.kind === 'browser' ? 'browser' : n.item.name;
 
 /** Painel à direita: o que vale saber do nó selecionado sem entrar nele. */
 function drawNodePanel(g: Grid, v: View, n: Node, top: number, bottom: number) {
@@ -239,7 +264,7 @@ function drawNodePanel(g: Grid, v: View, n: Node, top: number, bottom: number) {
   const links = v.edges.filter((e) => e.from === n.id || e.to === n.id).map((e) => v.nodes.find((m) => m.id === (e.from === n.id ? e.to : e.from))).filter((m): m is Node => !!m);
   const home = process.env.HOME ?? '';
 
-  head(n.kind === 'agent' ? t('agent') : n.kind === 'note' ? t('note') : n.kind === 'file' ? t('file') : n.kind === 'task' ? t('task') : n.kind === 'browser' ? 'browser' : t('service'));
+  head(n.kind === 'agent' ? t('agent') : n.kind === 'note' ? t('note') : n.kind === 'file' ? t('file') : n.kind === 'task' ? t('task') : n.kind === 'sub' ? t('subagent') : n.kind === 'browser' ? 'browser' : t('service'));
   if (n.kind === 'agent') {
     const s = n.session;
     row(t('name'), n.name, C.inkHi);
@@ -267,6 +292,15 @@ function drawNodePanel(g: Grid, v: View, n: Node, top: number, bottom: number) {
     row(t('from'), agent && agent.kind === 'agent' ? agent.name : '?', C.link);
     if (n.task.active) row(t('now'), n.task.active);
     y++; head(t('task')); text(`**${n.task.subject}**\n\n${n.task.description || t('_no description_')}`, C.ink, 10);
+  } else if (n.kind === 'sub') {
+    const s = n.sub, st = subState(s), parent = v.nodes.find((m) => m.id === n.agent);
+    row(t('name'), s.name, C.inkHi);
+    row(t('type'), s.type || '—');
+    row(t('state'), `${st.glyph} ${st.label}${!s.done && s.ageMs < Infinity ? `  ${ago(s.ageMs)}` : ''}`, st.color);
+    row(t('from'), parent && parent.kind === 'agent' ? parent.name : '?', C.link);
+    row(t('so far'), `${tok(s.tokens)}  ${G.h}  ${t('{0} tool call{1}', s.tools, s.tools === 1 ? '' : 's')}`);
+    y++; head(t('doing now')); text(s.now || t('nothing yet'), C.ink, 3);
+    y++; head(t('brief')); text(s.prompt.trim() || t('_no prompt_'), C.ink, 10);
   } else if (n.kind === 'browser') {
     row(t('page'), n.state.title || '—', C.inkHi);
     row('url', n.state.url || t('no url yet'));
@@ -302,8 +336,8 @@ export function renderProject(g: Grid, v: View, selected: string | null, scroll:
   g.put(13, 0, tt, C.link);
   g.put(13 + tt.length, 0, fit(`${G.h} ${v.project.cwd.replace(home, '~')} `, Math.max(0, W - 40 - t.length)), C.dim);
   const nA = v.nodes.filter((n) => n.kind === 'agent').length, nN = v.nodes.filter((n) => n.kind === 'note').length;
-  const nF = v.nodes.filter((n) => n.kind === 'file').length, nS = v.nodes.filter((n) => n.kind === 'service').length, nT = v.nodes.filter((n) => n.kind === 'task').length;
-  const counts = [nA && t('{0} agent{1}', nA, nA > 1 ? 's' : ''), nN && t('{0} note{1}', nN, nN > 1 ? 's' : ''), nT && t('{0} task{1}', nT, nT > 1 ? 's' : ''), nF && t('{0} file{1}', nF, nF > 1 ? 's' : ''), nS && t('{0} service{1}', nS, nS > 1 ? 's' : '')].filter(Boolean).join(` ${G.h} `);
+  const nF = v.nodes.filter((n) => n.kind === 'file').length, nS = v.nodes.filter((n) => n.kind === 'service').length, nT = v.nodes.filter((n) => n.kind === 'task').length, nSub = v.nodes.filter((n) => n.kind === 'sub').length;
+  const counts = [nA && t('{0} agent{1}', nA, nA > 1 ? 's' : ''), nN && t('{0} note{1}', nN, nN > 1 ? 's' : ''), nT && t('{0} task{1}', nT, nT > 1 ? 's' : ''), nSub && t('{0} subagent{1}', nSub, nSub > 1 ? 's' : ''), nF && t('{0} file{1}', nF, nF > 1 ? 's' : ''), nS && t('{0} service{1}', nS, nS > 1 ? 's' : '')].filter(Boolean).join(` ${G.h} `);
   if (counts) g.put(W - 4 - counts.length, 0, ` ${counts} `, C.dim);
 
   const vis = (r: Rect) => r.y >= top && r.y + r.h - 1 <= bottom;
@@ -314,7 +348,17 @@ export function renderProject(g: Grid, v: View, selected: string | null, scroll:
   for (const b of L.boxes) {
     if (!vis(b.rect)) continue;
     if (b.node.kind === 'agent') agentBox(g, b.node, b.rect, b.id === selected, b.id === src);
+    else if (b.node.kind === 'sub') subBox(g, b.node, b.rect, b.id === selected, b.id === src);
     else itemBox(g, b.node, b.rect, b.id === selected, b.id === src);
+  }
+  // the stem from an agent to its subagents, in the margin the indent leaves free
+  for (const b of L.boxes) {
+    if (b.node.kind !== 'agent') continue;
+    const subs = L.boxes.filter((s) => s.node.kind === 'sub' && s.node.agent === b.id);
+    if (!subs.length) continue;
+    const x = b.rect.x + 1, last = subs[subs.length - 1]!.rect.y + 1;
+    for (let y = b.rect.y + b.rect.h; y < last; y++) if (y >= top && y <= bottom) g.put(x, y, G.v, C.frame);
+    for (const s of subs) { const y = s.rect.y + 1; if (y >= top && y <= bottom) { g.put(x, y, s === subs[subs.length - 1] ? G.bl : G.teeL, C.frame); g.put(x + 1, y, G.h, C.frame); } }
   }
   // linhas depois das caixas: elas encostam nas bordas, nunca entram
   const rectOf = (id: string) => L.boxes.find((b) => b.id === id)?.rect;

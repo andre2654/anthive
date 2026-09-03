@@ -15,6 +15,8 @@ import { ROOT, ensure, slugify } from './store.ts';
 import * as store from './store.ts';
 import { Session, Ev, listSessions, sessionById, parseSession, PROJECTS } from './sessions.ts';
 import { Task, tasksOfSession } from './tasks.ts';
+import { Subagent, subagentsOfSession } from './subagents.ts';
+import { pending } from './approvals.ts';
 import { SYSTEM_PREAMBLE, BROWSER_PREAMBLE } from './chat.ts';
 import { BrowserMode, freePort, isUp, pages, pickPage, findChrome, launchChrome, waitUp, closeChrome as cdpClose } from './cdp.ts';
 import { t } from '../i18n.ts';
@@ -365,11 +367,12 @@ export interface NoteNode { kind: 'note'; id: string; doc: store.Doc }
 export interface FileNode { kind: 'file'; id: string; item: FileItem; exists: boolean; lines?: number }
 export interface ServiceNode { kind: 'service'; id: string; item: ServiceItem; alive: boolean }
 export interface TaskNode { kind: 'task'; id: string; task: Task; agent: string }   // agent = id do nó do agente
+export interface SubNode { kind: 'sub'; id: string; sub: Subagent; agent: string }   // a subagent of the last turn of that agent
 export interface BrowserState { url: string; title: string; snapshot: string; console: string; image?: { media: string; data: string }; lastTool?: string; counts?: string; busy: boolean; live?: boolean }
 export interface BrowserNode { kind: 'browser'; id: string; item: BrowserItem; state: BrowserState }
-export type Node = AgentNode | NoteNode | FileNode | ServiceNode | TaskNode | BrowserNode;
+export type Node = AgentNode | NoteNode | FileNode | ServiceNode | TaskNode | SubNode | BrowserNode;
 
-export interface Edge { from: string; to: string; kind: 'talk' | 'context' | 'assoc' | 'task'; thread?: store.Doc }
+export interface Edge { from: string; to: string; kind: 'talk' | 'context' | 'assoc' | 'task' | 'sub'; thread?: store.Doc }
 export interface View { project: Project; nodes: Node[]; edges: Edge[] }
 
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -403,6 +406,22 @@ export async function view(p: Project): Promise<View> {
       const id = `task-${a.id}-${t.id}`;
       nodes.push({ kind: 'task', id, task: t, agent: a.id });
       edges.push({ from: a.id, to: id, kind: 'task' });
+    }
+  }
+  // subagents of the last turn, per agent: what the Agent tool is running right now, read from the
+  // files Claude Code keeps for each one. A pending permission request is the only "approval" state.
+  const waiting = new Set((await pending(p.id).catch(() => [])).map((r) => r.agent));
+  for (const a of nodes.filter((n): n is AgentNode => n.kind === 'agent')) {
+    if (!a.session) continue;
+    if (waiting.has(a.name)) a.session = { ...a.session, state: 'waiting' };
+    const subs = await subagentsOfSession(a.session.path, a.session.bytes).catch(() => [] as Subagent[]);
+    const live = subs.filter((s) => !s.done && !s.silent);
+    if (!live.length && a.session.ageMs > 3600_000 && !subs.some((s) => !s.done)) continue;   // an old, finished turn: its subagents are history
+    for (const s of subs) { const id = `sub-${s.id}`; nodes.push({ kind: 'sub', id, sub: s, agent: a.id }); edges.push({ from: a.id, to: id, kind: 'sub' }); }
+    if (live.length && a.session.state !== 'waiting') {
+      // the parent's transcript sleeps while its subagents work: their files say how alive it is
+      const age = Math.min(a.session.ageMs, ...live.map((s) => s.ageMs));
+      a.session = { ...a.session, ageMs: age, state: age < 600_000 ? 'running' : a.session.state, lastText: `${live.length} subagent${live.length > 1 ? 's' : ''}: ${live.map((s) => s.name).join(', ')}` };
     }
   }
   // browser: o estado vem do que os agentes ligados fizeram com as ferramentas browser_*
@@ -462,7 +481,7 @@ export function buildBriefing(v: View, agentName: string, prompt: string): strin
   const notes = v.nodes.filter((n): n is NoteNode => n.kind === 'note');
   const files = v.nodes.filter((n): n is FileNode => n.kind === 'file');
   const svcs = v.nodes.filter((n): n is ServiceNode => n.kind === 'service');
-  const nameOf = (id: string) => { const n = v.nodes.find((x) => x.id === id); return !n ? id : n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.item.name; };
+  const nameOf = (id: string) => { const n = v.nodes.find((x) => x.id === id); return !n ? id : n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.kind === 'sub' ? n.sub.name : n.item.name; };
   const ctx = files.filter((f) => f.item.context);
   const ctxLine = ctx.length
     ? `Environment context: ${ctx.map((f) => `${f.item.label} (${f.lines ?? '?'} lines)`).join(' and ')} — read it first; it describes how this project runs, tests and is organized.`
@@ -493,7 +512,7 @@ export function parseBriefingReply(v: View, text: string): string[] {
   const wanted = m[1]!.split(/[,;]/).map((s) => s.trim().toLowerCase()).filter((s) => s && s !== 'nothing' && s !== 'none' && s !== 'nada');
   const ids: string[] = [];
   for (const n of v.nodes) {
-    if (n.kind === 'task') continue;
+    if (n.kind === 'task' || n.kind === 'sub') continue;
     const label = (n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.item.name).toLowerCase();
     const alt = n.kind === 'note' ? n.doc.id.toLowerCase() : n.kind === 'file' ? n.item.path.toLowerCase() : '';
     if (wanted.some((w) => w === label || w === alt || label.includes(w) || alt.endsWith(w))) ids.push(n.id);

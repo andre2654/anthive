@@ -19,7 +19,7 @@ import * as store from './core/store.ts';
 import { ROOT } from './core/store.ts';
 import * as bus from './core/bus.ts';
 import * as svc from './core/services.ts';
-import { Session, Ev, parseSession, windowOf } from './core/sessions.ts';
+import { Session, Ev, parseSession, summarize, windowOf } from './core/sessions.ts';
 import { ChatSession, ChatEvent, MODELS, EFFORTS, PERMISSIONS, DEEP_EFFORT, deepPrompt } from './core/chat.ts';
 import { readFile, writeFile, unlink, mkdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -32,7 +32,7 @@ type Modal =
   | { kind: 'pick'; title: string; items: PickItem[]; index: number; note?: string; submit: (v: string) => Promise<string> }
   | { kind: 'approval'; req: A.Request; linkable: string | null };
 
-const nodeLabel = (n: P.Node) => n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.kind === 'browser' ? 'browser' : n.item.name;
+const nodeLabel = (n: P.Node) => n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.kind === 'sub' ? n.sub.name : n.kind === 'browser' ? 'browser' : n.item.name;
 
 export class App {
   screen = new Screen();
@@ -82,6 +82,12 @@ export class App {
       if (this.view === 'agent' && this.agent) {
         const fresh = this.pv.nodes.find((n): n is P.AgentNode => n.kind === 'agent' && n.id === this.agent!.id);
         if (fresh) { this.agent = fresh; if (fresh.session && !this.chat && fresh.session.path !== this.lastLoadedPath) await this.loadTranscript(fresh.session); }
+        else if (this.watchOnly) {
+          // a subagent being watched: follow its transcript as it grows, without losing the cursor
+          const sn = this.pv.nodes.find((n): n is P.SubNode => n.kind === 'sub' && n.id === this.agent!.id);
+          const s = sn?.sub.path ? await summarize(sn.sub.path) : null;
+          if (s && s.bytes !== this.agent.session?.bytes) { this.agent = { ...this.agent, session: s }; this.evs = await parseSession(s.path); this.rebuild(false); }
+        }
       }
       if (this.view === 'service' && this.service) this.svcStats = await svc.stats(this.service.pid);
     }
@@ -188,6 +194,13 @@ export class App {
     if (n.kind === 'file') { this.file = n.item; this.fileScroll = 0; this.fileLines = await readFile(n.item.path, 'utf8').then((t) => t.split('\n')).catch(() => null); this.view = 'file'; }
     if (n.kind === 'service') { this.service = n.item; this.svcStats = await svc.stats(n.item.pid); this.view = 'service'; }
     if (n.kind === 'task') { this.task = n; this.view = 'task'; }
+    if (n.kind === 'sub') {
+      // a subagent opens as a read-only transcript: the same tree as an agent, no chat
+      if (!n.sub.path) { this.say(t('no transcript yet — it is still starting'), 3000); return; }
+      const s = await summarize(n.sub.path); if (!s) { this.say(t('its transcript is not readable yet'), 3000); return; }
+      const parent = this.node(n.agent), pname = parent && parent.kind === 'agent' ? parent.name : '?';
+      return this.openAgent({ kind: 'agent', id: n.id, name: `${pname} ${G.sub} ${n.sub.name}`, item: null, session: s, cwd: parent && parent.kind === 'agent' ? parent.cwd : this.project?.cwd ?? '' });
+    }
     if (n.kind === 'browser') { this.browser = n; this.typing = false; this.view = 'browser'; void this.op(this.openLive(n.item)); }
     this.dirty = true;
   }
@@ -376,6 +389,7 @@ export class App {
   }
   async commitLink() {
     const src = this.linking?.source, dst = this.sel; if (!src || !dst) return;
+    if (this.node(dst)?.kind === 'sub') { this.say(t('a subagent cannot be linked — link its parent'), 4000); this.linking = null; this.dirty = true; return; }
     if (src === dst) { this.say(t('pick another node')); return; }
     this.linking = null;
     try { const msg = await this.connect(src, dst); if (msg) { await this.load(); this.say(msg, 4000); } }
@@ -388,6 +402,7 @@ export class App {
     const pid = this.project.id;
     if (n.kind === 'agent' && !n.item) { this.say(t('a discovered session cannot be removed — it lives on disk'), 4000); return; }
     if (n.kind === 'task') { this.say(t('the task belongs to the agent — it closes it with TaskUpdate'), 4000); return; }
+    if (n.kind === 'sub') { this.say(t('a subagent lives inside its parent\'s turn — it ends by itself'), 4000); return; }
     if (n.kind === 'file' && n.item.context) { this.say(t('Claude context file — read every session; edit with e, it cannot be unlinked'), 5000); return; }
     const what = n.kind === 'note' ? t('delete the note "{0}"?', n.doc.title) : n.kind === 'file' ? t('unlink {0} from the project?', n.item.label) : n.kind === 'service' ? t('remove {0} from the project?', n.item.name) : n.kind === 'browser' ? t('remove the browser from the project?') : t('remove agent {0}?', n.name);
     const lines = n.kind === 'note' ? [t('the note file is deleted')] : n.kind === 'file' ? [t('the file stays on disk; it only leaves the map')] : n.kind === 'service' ? [t('the process keeps running; it only leaves the map')] : n.kind === 'browser' ? [t('Chrome closes; the playwright entry stays in .mcp.json')] : [t('the transcript stays; so does the worktree')];
@@ -421,7 +436,7 @@ export class App {
       const other = e.from === this.agent.id ? e.to : e.to === this.agent.id ? e.from : null; if (!other) continue;
       const n = this.node(other); if (!n) continue;
       const st = e.thread ? store.threadState(e.thread) : null;
-      out.push({ glyph: n.kind === 'agent' ? G.swap : KIND_GLYPH[n.kind], label: n.kind === 'agent' && st ? `${n.name} ${st.turn}/${st.budget}` : nodeLabel(n), color: n.kind === 'agent' ? C.link : n.kind === 'note' ? C.link : n.kind === 'service' ? C.run : n.kind === 'task' ? C.hold : n.kind === 'browser' ? C.run : C.ink });
+      out.push({ glyph: n.kind === 'agent' ? G.swap : KIND_GLYPH[n.kind], label: n.kind === 'agent' && st ? `${n.name} ${st.turn}/${st.budget}` : nodeLabel(n), color: n.kind === 'agent' ? C.link : n.kind === 'note' ? C.link : n.kind === 'service' ? C.run : n.kind === 'task' ? C.hold : n.kind === 'sub' ? C.run : n.kind === 'browser' ? C.run : C.ink });
     }
     return out;
   }
@@ -454,8 +469,12 @@ export class App {
       this.say(`copiado: ${[...text].length} caracteres`);
     } catch { this.say(t('pbcopy not available')); }
   }
+  /** The transcript open is a subagent's: it is watched, never talked to. */
+  private get watchOnly() { return !!this.agent?.id.startsWith('sub-'); }
+
   async startChat() {
     const a = this.agent; if (!a) return;
+    if (this.watchOnly) { this.say(t('a subagent: watch only — its parent talks to it'), 4000); return; }
     if (!this.consentOk) { await this.withConsent(() => this.startChat()); return; }
     const browser = !!(this.project && a.item && (await P.agentHasBrowser(this.project.id, a.item.id)));
     if (browser && this.project && a.item) {
@@ -638,7 +657,7 @@ export class App {
         else if (k.k === 'esc') { this.project = null; this.pv = null; this.view = 'home'; void this.op(this.load()); }
         else if (k.k === 'char') {
           if (k.c === 'n') this.pickKind();
-          else if (k.c === 'l') { if (!this.sel) this.say(t('select something first')); else if ((this.rectsOnScreen().length) < 2) this.say(t('no other node to link')); else { this.linking = { source: this.sel }; this.dirty = true; } }
+          else if (k.c === 'l') { if (!this.sel) this.say(t('select something first')); else if (this.node(this.sel)?.kind === 'sub') this.say(t('a subagent cannot be linked — link its parent'), 4000); else if ((this.rectsOnScreen().length) < 2) this.say(t('no other node to link')); else { this.linking = { source: this.sel }; this.dirty = true; } }
           else if (k.c === 'd') this.removeSel();
           else if (k.c === 'r') void this.load();
           else if (k.c === ']') { this.showPanel = !this.showPanel; this.ensureVisible(); this.dirty = true; }
@@ -698,7 +717,9 @@ export class App {
         }
         else if (k.k === 'esc') { this.view = 'project'; void this.op(this.load()); }
         else if (k.k === 'char') {
-          if (k.c === 'i') { this.deep = false; this.composing = true; if (!this.chat) void this.op(this.startChat()); }
+          if (k.c === 'i' && this.watchOnly) this.say(t('a subagent: watch only — its parent talks to it'), 4000);
+          else if (k.c === 'i') { this.deep = false; this.composing = true; if (!this.chat) void this.op(this.startChat()); }
+      else if (k.c === 'D' && this.watchOnly) this.say(t('a subagent: watch only — its parent talks to it'), 4000);
       else if (k.c === 'D') { this.composing = true; this.setDeep(true); if (!this.chat) void this.op(this.startChat()); }
           else if (k.c === 'm') this.pickSetting('model'); else if (k.c === 'e') this.pickSetting('effort'); else if (k.c === 'p') this.pickSetting('permissionMode');
           else if (k.c === 'l' && this.agent) this.pickLinkTarget(this.agent.id);
