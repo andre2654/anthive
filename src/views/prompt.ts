@@ -99,11 +99,11 @@ export function renderPick(g: Grid, title: string, items: PickItem[], index: num
 }
 
 /** A permission request from an agent: what it wants to run, and the four answers. */
-export function renderApproval(g: Grid, agent: string, tool: string, what: string, opts: { linkable: string | null; prefix: string }) {
+export function renderApproval(g: Grid, agent: string, tool: string, what: string, opts: { linkable: string | null; rule: string }) {
   const { W, H } = g;
   const w = Math.min(W - 6, 90), inner = w - 4;
   const body = wrapText(what, inner).slice(0, 6);
-  const extra = [`a  always allow  ${G.h}  ${fit(`${tool}(${opts.prefix}:*)`, inner - 18)}`, ...(opts.linkable ? [`l  allow and link ${fit(opts.linkable, inner - 18)} to ${agent}`] : [])];
+  const extra = [`a  always allow  ${G.h}  ${fit(opts.rule, inner - 18)}`, ...(opts.linkable ? [`l  allow and link ${fit(opts.linkable, inner - 18)} to ${agent}`] : []), `t  trust ${agent}: everything allowed from now on (p → ask again)`];
   const h = 2 + 1 + body.length + 1 + extra.length + 2;
   const x = Math.floor((W - w) / 2), y = Math.max(1, H - 4 - h);
   const box: Rect = { x, y, w, h };

@@ -1,5 +1,5 @@
 /** Permission requests: what is remembered, what a linked file covers, and the file round trip with the user's answer. */
-import { prefixOf, summary, matchesRule, touchesLinked, autoDecide, ask, pending, decide, fileIn } from '../src/core/approvals.ts';
+import { prefixOf, summary, matchesRule, touchesLinked, autoDecide, ask, pending, decide, fileIn, TRUST, isTrusted, ruleLabel } from '../src/core/approvals.ts';
 import type { Graph } from '../src/core/project.ts';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,6 +9,8 @@ const must = (l: string, c: boolean) => { console.log(c ? `✓ ${l}` : `✗ ${l}
 
 must('the prefix of a command stops at its first flag', prefixOf('Bash', { command: 'python3 scripts/ler_carteira.py --painel --x' }) === 'python3 scripts/ler_carteira.py' && prefixOf('Bash', { command: 'git log --oneline' }) === 'git log' && prefixOf('Bash', { command: 'ls' }) === 'ls');
 must('the prefix of a file tool is its path', prefixOf('Edit', { file_path: '/p/a.ts', old_string: 'x' }) === '/p/a.ts');
+must('web rules are the whole tool (search) or the site (fetch)', prefixOf('WebSearch', { query: 'gado boi' }) === '' && prefixOf('WebFetch', { url: 'https://x.com/a/b?c' }) === 'https://x.com' && ruleLabel('WebSearch', '') === 'WebSearch(*)' && ruleLabel('WebFetch', 'https://x.com') === 'WebFetch(https://x.com:*)' && ruleLabel(TRUST, TRUST) === 'everything');
+must('an empty prefix matches every call of that tool; trust matches everything', matchesRule({ agent: 'api', tool: 'WebSearch', prefix: '', created: 0 }, 'WebSearch', { query: 'anything' }) && matchesRule({ agent: 'api', tool: TRUST, prefix: TRUST, created: 0 }, 'Bash', { command: 'rm -rf /' }));
 must('summary shows the command or the path', summary('Bash', { command: 'echo  hi' }) === 'echo hi' && summary('Read', { file_path: '/p/a.md' }) === '/p/a.md');
 must('a rule matches by tool and prefix', matchesRule({ agent: 'api', tool: 'Bash', prefix: 'python3 scripts/ler_carteira.py', created: 0 }, 'Bash', { command: 'python3 scripts/ler_carteira.py --painel' }) && !matchesRule({ agent: 'api', tool: 'Bash', prefix: 'python3 scripts/ler_carteira.py', created: 0 }, 'Bash', { command: 'python3 other.py' }));
 const cwd = mkdtempSync(join(tmpdir(), 'tai-appr-'));
@@ -17,6 +19,8 @@ const files = [{ kind: 'file' as const, id: 'f1', path: join(cwd, 'Carteira.numb
 must('a linked file is recognised by absolute path, relative path or bare name', !!touchesLinked('Bash', { command: `python3 scripts/ler.py ${join(cwd, 'Carteira.numbers')}` }, files, cwd) && !!touchesLinked('Bash', { command: 'open Carteira.numbers' }, files, cwd) && !!touchesLinked('Read', { file_path: join(cwd, 'Carteira.numbers') }, files, cwd) && !touchesLinked('Bash', { command: 'rm -rf node_modules' }, files, cwd));
 const g: Graph = { items: [{ kind: 'agent', id: 'a1', name: 'api', cwd, sessionId: 'u', worktree: null, created: 0 }, files[0]!], links: [{ from: 'a1', to: 'f1', created: 0 }], rules: [{ agent: 'api', tool: 'Bash', prefix: 'python3 scripts/ler.py', created: 0 }] };
 must('autoDecide: a rule allows, a linked file allows, the rest waits', autoDecide({ agent: 'api', tool: 'Bash', input: { command: 'python3 scripts/ler.py --painel' }, cwd }, g)?.reason.startsWith('rule') === true && autoDecide({ agent: 'api', tool: 'Bash', input: { command: 'cat Carteira.numbers' }, cwd }, g)?.reason.startsWith('linked') === true && autoDecide({ agent: 'api', tool: 'Bash', input: { command: 'rm -rf /' }, cwd }, g) === null && autoDecide({ agent: 'db', tool: 'Bash', input: { command: 'python3 scripts/ler.py' }, cwd }, g) === null);
+const trusted: Graph = { ...g, rules: [{ agent: 'db', tool: TRUST, prefix: TRUST, created: 0 }] };
+must('a trusted agent is allowed anything, the others still wait', autoDecide({ agent: 'db', tool: 'Bash', input: { command: 'rm -rf /' }, cwd }, trusted)?.reason === 'trusted agent' && isTrusted(trusted, 'db') && !isTrusted(trusted, 'api') && autoDecide({ agent: 'api', tool: 'Bash', input: { command: 'rm -rf /' }, cwd }, trusted) === null);
 const req = { id: 'r', agent: 'api', project: null, cwd, tool: 'Bash', input: { command: 'python3 scripts/ler.py --painel' }, ts: 0, state: 'pending' as const };
 must('fileIn finds the project file the request touches (not linked yet)', (await fileIn(req, [])) === join(cwd, 'scripts', 'ler.py') && (await fileIn(req, [{ kind: 'file', id: 'x', path: join(cwd, 'scripts', 'ler.py'), label: 'ler.py', created: 0 }])) === null);
 // round trip: the bus asks, the TUI answers

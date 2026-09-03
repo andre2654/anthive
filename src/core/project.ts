@@ -111,7 +111,12 @@ export async function addRule(pid: string, rule: Omit<Rule, 'created'>) {
   await saveGraph(pid, g);
 }
 /** The remembered rules of an agent as Claude Code allow patterns, for the process allowlist. */
-export const rulesFor = (g: Graph, agent: string): string[] => (g.rules ?? []).filter((r) => r.agent === agent).map((r) => `${r.tool}(${r.prefix}:*)`);
+export const rulesFor = (g: Graph, agent: string): string[] => (g.rules ?? []).filter((r) => r.agent === agent && r.tool === 'Bash' && r.prefix).map((r) => `${r.tool}(${r.prefix}:*)`);
+export async function removeRules(pid: string, agent: string, tool?: string) {
+  const g = await loadGraph(pid);
+  g.rules = (g.rules ?? []).filter((r) => !(r.agent === agent && (tool === undefined || r.tool === tool)));
+  await saveGraph(pid, g);
+}
 
 export async function saveGraph(id: string, g: Graph) {
   await mkdir(join(ROOT, 'projects'), { recursive: true });

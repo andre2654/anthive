@@ -28,14 +28,21 @@ export function summary(tool: string, input: Record<string, unknown>): string {
 }
 
 /** What "always allow this" should remember: the command up to its first flag, or the path. */
+export const TRUST = '*';   // a rule with tool '*' means: everything this agent asks is allowed
+
 export function prefixOf(tool: string, input: Record<string, unknown>): string {
+  if (tool === 'WebSearch') return '';   // the whole tool: a rule per query would never match again
+  if (tool === 'WebFetch') { try { return new URL(String(input.url ?? '')).origin; } catch { return ''; } }
   if (tool !== 'Bash') return summary(tool, input);
   const toks = String(input.command ?? '').trim().split(/\s+/);
   const cut = toks.findIndex((t, i) => i > 0 && t.startsWith('-'));
   return (cut > 0 ? toks.slice(0, cut) : toks).join(' ').slice(0, 200);
 }
 
-export const matchesRule = (rule: Rule, tool: string, input: Record<string, unknown>) => rule.tool === tool && !!rule.prefix && summary(tool, input).startsWith(rule.prefix);
+export const matchesRule = (rule: Rule, tool: string, input: Record<string, unknown>) => rule.tool === TRUST || (rule.tool === tool && (rule.prefix === '' || summary(tool, input).startsWith(rule.prefix)));
+export const isTrusted = (g: Graph, agent: string) => (g.rules ?? []).some((r) => r.agent === agent && r.tool === TRUST);
+/** How a rule reads on screen: WebSearch(*), WebFetch(https://x.com:*), Bash(git log:*), or "everything". */
+export const ruleLabel = (tool: string, prefix: string) => tool === TRUST ? 'everything' : `${tool}(${prefix ? `${prefix}:*` : '*'})`;
 
 /** The linked file the request touches, if any: by absolute path, by path relative to the project, or by bare file name. */
 export function touchesLinked(tool: string, input: Record<string, unknown>, files: FileItem[], cwd: string): FileItem | null {
@@ -70,7 +77,7 @@ export function linkedFiles(g: Graph, agent: string): FileItem[] {
 /** Decides without the user when a rule or a linked file covers the request. */
 export function autoDecide(req: Pick<Request, 'agent' | 'tool' | 'input' | 'cwd'>, g: Graph): { state: 'allow'; reason: string } | null {
   const rule = (g.rules ?? []).find((r) => r.agent === req.agent && matchesRule(r, req.tool, req.input));
-  if (rule) return { state: 'allow', reason: `rule: ${rule.prefix}` };
+  if (rule) return { state: 'allow', reason: rule.tool === TRUST ? 'trusted agent' : `rule: ${ruleLabel(rule.tool, rule.prefix)}` };
   const f = touchesLinked(req.tool, req.input, linkedFiles(g, req.agent), req.cwd);
   if (f) return { state: 'allow', reason: `linked file: ${f.label}` };
   return null;

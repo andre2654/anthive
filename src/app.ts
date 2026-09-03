@@ -203,10 +203,11 @@ export class App {
     this.screen.write('\x07'); this.dirty = true;
   }
   /** y/a/l/n on a request: allow, allow and remember the rule, allow and link the file it touches, deny. */
-  async answer(req: A.Request, how: 'allow' | 'always' | 'link' | 'deny', linkable: string | null): Promise<string> {
+  async answer(req: A.Request, how: 'allow' | 'always' | 'link' | 'trust' | 'deny', linkable: string | null): Promise<string> {
     const pid = this.project?.id;
+    if (how === 'trust' && pid) { await P.addRule(pid, { agent: req.agent, tool: A.TRUST, prefix: A.TRUST }); await A.decide(req.id, 'allow', 'trusted agent'); await this.load(); return t('{0} is trusted now: nothing else will ask (p → ask again revokes)', req.agent); }
     if (how === 'deny') { await A.decide(req.id, 'deny', 'the user said no'); return t('denied {0}', req.tool); }
-    if (how === 'always' && pid) { const prefix = A.prefixOf(req.tool, req.input); await P.addRule(pid, { agent: req.agent, tool: req.tool, prefix }); await A.decide(req.id, 'allow', `rule: ${prefix}`); await this.load(); return t('allowed, and remembered: {0}', `${req.tool}(${prefix}:*)`); }
+    if (how === 'always' && pid) { const prefix = A.prefixOf(req.tool, req.input); await P.addRule(pid, { agent: req.agent, tool: req.tool, prefix }); await A.decide(req.id, 'allow', `rule: ${A.ruleLabel(req.tool, prefix)}`); await this.load(); return t('allowed, and remembered: {0}', A.ruleLabel(req.tool, prefix)); }
     if (how === 'link' && pid && linkable) {
       const g = await P.loadGraph(pid); const ag = g.items.find((i) => i.kind === 'agent' && i.name === req.agent);
       const f = await P.addFile(pid, linkable); if (ag) await P.link(pid, ag.id, f.id);
@@ -472,9 +473,11 @@ export class App {
     // o barramento tem que existir no diretório ANTES do processo subir: é lido na partida
     try { const bus = await P.ensureBus(a.cwd); if (bus !== 'unchanged') this.say(t('bus {0} in .mcp.json — note_write, project_map and the rest work here now', bus === 'new' ? t('new') : t('updated')), 6000); }
     catch (e) { this.say(t('could not write .mcp.json: {0}', (e as Error).message), 6000); }
-    const allow = this.project && a.item ? P.rulesFor(await P.loadGraph(this.project.id), a.item.name) : [];
+    const graph = this.project && a.item ? await P.loadGraph(this.project.id) : null;
+    const allow = graph && a.item ? P.rulesFor(graph, a.item.name) : [];
+    const trusted = !!(graph && a.item && A.isTrusted(graph, a.item.name));
     this.chat = new ChatSession({ cwd: a.cwd, resume: a.session ? sid : undefined, sessionId: a.session ? undefined : sid, agent: a.item?.name, browser, deep: this.deep, allow,
-      model: this.prefs.model || undefined, effort: this.prefs.effort || (this.deep ? DEEP_EFFORT : undefined), permissionMode: this.prefs.permissionMode || undefined }, (e) => this.onChat(e));
+      model: this.prefs.model || undefined, effort: this.prefs.effort || (this.deep ? DEEP_EFFORT : undefined), permissionMode: this.prefs.permissionMode || (trusted ? 'bypassPermissions' : undefined) }, (e) => this.onChat(e));
     this.chat.start();
   }
   stopChat() { this.chat?.stop(); this.chat = null; this.composing = false; this.dirty = true; }
@@ -517,9 +520,11 @@ export class App {
     const base = { model: MODELS, effort: EFFORTS, permissionMode: PERMISSIONS }[kind];
     const cur = this.chat?.[kind] || this.prefs[kind] || (kind === 'model' ? this.agent?.session?.model : kind === 'effort' ? this.agent?.session?.effort : '') || '';
     const values = cur && !base.includes(cur) ? [cur, ...base] : [...base];
-    const items: PickItem[] = [{ value: '', label: t('(session default)'), hint: t('no flag passed'), current: !cur }, ...values.map((v) => ({ value: v, label: v, current: v === cur }))];
+    const items: PickItem[] = [{ value: '', label: t('(session default)'), hint: t('no flag passed'), current: !cur }, ...values.map((v) => ({ value: v, label: v, current: v === cur })), ...(kind === 'permissionMode' && this.agent?.item ? [{ value: '__untrust', label: t('ask again'), hint: t('forgets the trust and the remembered rules of this agent') }] : [])];
     this.modal = { kind: 'pick', title: label, items, index: Math.max(0, items.findIndex((i) => i.current)), note: this.chat ? t('restarts in the same session — nothing is lost') : t('applies to the next chat'),
-      submit: async (v) => { this.prefs[kind] = v; if (this.chat) this.chat.restart({ [kind]: v } as any); return `${label}: ${v || t('default')}`; } };
+      submit: async (v) => {
+        if (v === '__untrust') { if (this.project && this.agent?.item) await P.removeRules(this.project.id, this.agent.item.name); this.prefs.permissionMode = ''; if (this.chat) this.chat.restart({ permissionMode: '' }); return t('{0} asks again from now on', this.agent?.name ?? ''); }
+        this.prefs[kind] = v; if (this.chat) this.chat.restart({ [kind]: v } as any); return `${label}: ${v || t('default')}`; } };
     this.dirty = true;
   }
   /** Ligar a partir de uma tela de item: lista os outros nós do projeto. */
@@ -579,10 +584,11 @@ export class App {
     if (this.modal) {
       const m = this.modal;
       if (m.kind === 'approval') {
-        const go = (how: 'allow' | 'always' | 'link' | 'deny') => { const { req, linkable } = m; void this.runModal(() => this.answer(req, how, linkable)); };
+        const go = (how: 'allow' | 'always' | 'link' | 'trust' | 'deny') => { const { req, linkable } = m; void this.runModal(() => this.answer(req, how, linkable)); };
         if (k.k === 'char' && 'yY'.includes(k.c)) go('allow');
         else if (k.k === 'char' && 'aA'.includes(k.c)) go('always');
         else if (k.k === 'char' && 'lL'.includes(k.c) && m.linkable) go('link');
+        else if (k.k === 'char' && 'tT'.includes(k.c)) go('trust');
         else if (k.k === 'char' && 'nN'.includes(k.c)) go('deny');
         else if (k.k === 'esc') { this.snoozed.add(m.req.id); this.modal = null; this.say(t('later — the agent keeps waiting; the request comes back on the next open'), 5000); }
         this.dirty = true; return;
@@ -752,7 +758,7 @@ export class App {
 
     if (this.modal?.kind === 'form') renderForm(g, this.modal.form, this.modal.note);
     else if (this.modal?.kind === 'confirm') renderConfirm(g, this.modal.title, this.modal.lines);
-    else if (this.modal?.kind === 'approval') renderApproval(g, this.modal.req.agent, this.modal.req.tool, A.summary(this.modal.req.tool, this.modal.req.input), { linkable: this.modal.linkable ? basename(this.modal.linkable) : null, prefix: A.prefixOf(this.modal.req.tool, this.modal.req.input) });
+    else if (this.modal?.kind === 'approval') renderApproval(g, this.modal.req.agent, this.modal.req.tool, A.summary(this.modal.req.tool, this.modal.req.input), { linkable: this.modal.linkable ? basename(this.modal.linkable) : null, rule: A.ruleLabel(this.modal.req.tool, A.prefixOf(this.modal.req.tool, this.modal.req.input)) });
     else if (this.modal?.kind === 'pick') renderPick(g, this.modal.title, this.modal.items, this.modal.index, this.modal.note);
     else if (this.inline) {
       const lab = `${this.inline.label} › `; const w = this.inline.input.window(Math.max(8, g.W - lab.length - 26));
