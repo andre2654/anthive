@@ -440,6 +440,8 @@ export class App {
     }
     return out;
   }
+  /** A model/effort/permission change asked mid-turn: applied by a restart when the answer arrives. */
+  private pendingPatch: Partial<Pick<ChatSession, 'model' | 'effort' | 'permissionMode'>> | null = null;
   private get live() { const c = this.chat; return c ? { model: c.model, effort: c.effort, permissionMode: c.permissionMode, deep: c.deep, busy: c.busy, thinking: c.thinking, summary: c.summary, cost: c.cost } : null; }
 
   /** O painel direito: o que vale saber do agente sem sair da conversa. */
@@ -499,11 +501,25 @@ export class App {
       model: this.prefs.model || undefined, effort: this.prefs.effort || (this.deep ? DEEP_EFFORT : undefined), permissionMode: this.prefs.permissionMode || (trusted ? 'bypassPermissions' : undefined) }, (e) => this.onChat(e));
     this.chat.start();
   }
-  stopChat() { this.chat?.stop(); this.chat = null; this.composing = false; this.dirty = true; }
+  stopChat() { this.chat?.stop(); this.chat = null; this.pendingPatch = null; this.composing = false; this.dirty = true; }
+  /** Subagents of the open agent that are alive right now, as the map sees them. */
+  private liveSubagents(): number { return this.pv?.nodes.filter((n) => n.kind === 'sub' && n.agent === this.agent?.id && !n.sub.done && !n.sub.silent).length ?? 0; }
+  /** x: closing a chat mid-turn kills the process, and the subagents with it — so it asks first. */
+  closeChat() {
+    const c = this.chat; if (!c) return;
+    if (!c.busy) { this.stopChat(); this.say(t('chat stopped — the transcript stays')); return; }
+    const subs = this.liveSubagents(), name = this.agent?.name ?? 'the agent';
+    this.modal = { kind: 'confirm', title: t('{0} is mid-turn — close anyway?', name), lines: [
+      subs ? t('{0} subagent{1} running: closing the chat kills them, and their work is lost', subs, subs > 1 ? 's' : '') : t('a tool is still running: closing the chat loses this turn'),
+      t('the transcript stays; the next chat resumes the session, without this turn'),
+    ], ok: async () => { this.stopChat(); return t('chat stopped — the turn and its subagents are gone'); } };
+    this.dirty = true;
+  }
   private onChat(e: ChatEvent) {
     if (e.kind === 'ev') { this.evs.push(e.ev); this.rebuild(true); }
     else if (e.kind === 'result') {
       this.screen.write('\x07');
+      if (this.pendingPatch && this.chat && !this.chat.busy) { const patch = this.pendingPatch; this.pendingPatch = null; this.chat.restart(patch); this.say(t('applied now: {0} — same session', Object.entries(patch).map(([k, v]) => `${k} ${v || t('default')}`).join(', ')), 5000); }
       const web = e.denials.some((d) => d === 'WebSearch' || d === 'WebFetch');
       const den = e.denials.length ? ` · ${web ? t('denied {0} — D or tab (deep search) allows the web', e.denials.join(', ')) : t('denied {0} — p changes permissions', e.denials.join(', '))}` : '';
       const note = this.chat?.deep ? /note:\/\/([\w-]+)/.exec(e.text)?.[1] : null;
@@ -534,16 +550,23 @@ export class App {
     else this.say(t('deep search: the next turn researches the repo, the hive and the web'));
   }
 
+  /** Restarts the chat with the change now, or after the answer when it is mid-turn (a restart kills the turn and its subagents). Returns true when deferred. */
+  private applySetting(patch: Partial<Pick<ChatSession, 'model' | 'effort' | 'permissionMode'>>): boolean {
+    const c = this.chat; if (!c) return false;
+    if (!c.busy) { c.restart(patch); return false; }
+    this.pendingPatch = { ...this.pendingPatch, ...patch };
+    return true;
+  }
   pickSetting(kind: 'model' | 'effort' | 'permissionMode') {
     const label = { model: t('model'), effort: t('effort'), permissionMode: t('permissions') }[kind];
     const base = { model: MODELS, effort: EFFORTS, permissionMode: PERMISSIONS }[kind];
     const cur = this.chat?.[kind] || this.prefs[kind] || (kind === 'model' ? this.agent?.session?.model : kind === 'effort' ? this.agent?.session?.effort : '') || '';
     const values = cur && !base.includes(cur) ? [cur, ...base] : [...base];
     const items: PickItem[] = [{ value: '', label: t('(session default)'), hint: t('no flag passed'), current: !cur }, ...values.map((v) => ({ value: v, label: v, current: v === cur })), ...(kind === 'permissionMode' && this.agent?.item ? [{ value: '__untrust', label: t('ask again'), hint: t('forgets the trust and the remembered rules of this agent') }] : [])];
-    this.modal = { kind: 'pick', title: label, items, index: Math.max(0, items.findIndex((i) => i.current)), note: this.chat ? t('restarts in the same session — nothing is lost') : t('applies to the next chat'),
+    this.modal = { kind: 'pick', title: label, items, index: Math.max(0, items.findIndex((i) => i.current)), note: this.chat?.busy ? t('mid-turn: applies when this answer finishes, then restarts in the same session') : this.chat ? t('restarts in the same session — nothing is lost') : t('applies to the next chat'),
       submit: async (v) => {
-        if (v === '__untrust') { if (this.project && this.agent?.item) await P.removeRules(this.project.id, this.agent.item.name); this.prefs.permissionMode = ''; if (this.chat) this.chat.restart({ permissionMode: '' }); return t('{0} asks again from now on', this.agent?.name ?? ''); }
-        this.prefs[kind] = v; if (this.chat) this.chat.restart({ [kind]: v } as any); return `${label}: ${v || t('default')}`; } };
+        if (v === '__untrust') { if (this.project && this.agent?.item) await P.removeRules(this.project.id, this.agent.item.name); this.prefs.permissionMode = ''; this.applySetting({ permissionMode: '' }); return t('{0} asks again from now on', this.agent?.name ?? ''); }
+        this.prefs[kind] = v; const later = this.applySetting({ [kind]: v } as any); return `${label}: ${v || t('default')}${later ? ` — ${t('applies when this answer finishes')}` : ''}`; } };
     this.dirty = true;
   }
   /** Ligar a partir de uma tela de item: lista os outros nós do projeto. */
@@ -637,7 +660,7 @@ export class App {
       if (k.k === 'mouse' && k.press && k.button === 0) { const h = this.grid.hitTest(k.x, k.y); if (h) { this.sel = h; this.dirty = true; if (h !== this.linking.source) void this.op(this.commitLink()); } return; }
       if (k.k === 'char' && k.c !== 'q') return;
     }
-    if (k.k === 'char' && (k.c === 'q' || k.c === 'Q') && !(this.view === 'agent' && this.composing)) return this.quit();
+    if (k.k === 'char' && (k.c === 'q' || k.c === 'Q') && !(this.view === 'agent' && this.composing)) return this.askQuit();
 
     switch (this.view) {
       case 'home':
@@ -723,7 +746,7 @@ export class App {
       else if (k.c === 'D') { this.composing = true; this.setDeep(true); if (!this.chat) void this.op(this.startChat()); }
           else if (k.c === 'm') this.pickSetting('model'); else if (k.c === 'e') this.pickSetting('effort'); else if (k.c === 'p') this.pickSetting('permissionMode');
           else if (k.c === 'l' && this.agent) this.pickLinkTarget(this.agent.id);
-          else if (k.c === 'x') { this.stopChat(); this.say(t('chat stopped — the transcript stays')); }
+          else if (k.c === 'x') this.closeChat();
           else if (k.c === 't') { this.showThinking = !this.showThinking; this.rebuild(false); this.say(this.showThinking ? t('thinking shown') : t('thinking hidden')); }
           else if (k.c === 'y') this.copyTurn();
           else if (k.c === ']') { this.showPanel = !this.showPanel; this.rebuild(false); }
@@ -807,6 +830,16 @@ export class App {
   private pulsing() { return this.view === 'project' && !this.modal && !!this.pv && this.pv.edges.some((e) => e.kind !== 'talk' || (e.thread && store.threadState(e.thread).state === 'open')); }
 
   quit(): never { this.chat?.stop(); this.screen.restore(); process.exit(0); }
+  /** q: quitting kills the live chat with its subagents — asks when the agent is mid-turn. */
+  askQuit() {
+    if (!this.chat?.busy) return this.quit();
+    const subs = this.liveSubagents(), name = this.agent?.name ?? 'the agent';
+    this.modal = { kind: 'confirm', title: t('{0} is mid-turn — quit anyway?', name), lines: [
+      subs ? t('{0} subagent{1} running: the chat dies with Anthive, and their work is lost', subs, subs > 1 ? 's' : '') : t('a tool is still running: the chat dies with Anthive, and this turn is lost'),
+      t('esc keeps Anthive open until the answer arrives'),
+    ], ok: async () => this.quit() };
+    this.dirty = true;
+  }
   async run(initial?: P.Project) {
     await this.loadConsent();
     if (initial) { this.project = initial; this.view = 'project'; }

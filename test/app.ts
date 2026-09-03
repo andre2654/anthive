@@ -19,6 +19,7 @@ writeFileSync(join(fakeBin, 'claude'), [
   'n=0',
   'while IFS= read -r line; do',
   '  n=$((n+1))',
+  '  case "$line" in *slow*) sleep 2;; esac',
   `  printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok %s"}]},"uuid":"fake-u-%s","timestamp":"2026-09-02T00:00:00Z"}\\n' "$n" "$n"`,
   `  printf '%s\\n' '{"type":"result","subtype":"success","result":"see note://research-x","total_cost_usd":0.001,"permission_denials":[]}'`,
   'done',
@@ -162,6 +163,33 @@ type(app, 'p');
 must('the permission picker offers "ask again" to a trusted agent', app.modal?.kind === 'pick' && app.modal.items.some((i) => i.value === '__untrust'));
 if (app.modal?.kind === 'pick') app.modal.index = app.modal.items.findIndex((i) => i.value === '__untrust'); press(app, 'enter'); await settle();
 must('ask again forgets the trust and the rules', !A.isTrusted(await P.loadGraph(app.project!.id), 'api') && P.rulesFor(await P.loadGraph(app.project!.id), 'api').length === 0);
+
+// --- mid-turn: x and q ask first; a setting changed mid-turn waits for the answer ---
+const spawns = argvLines().length;
+type(app, 'i'); await settle();
+must('a new chat spawns for the guards', (await waitFor(() => argvLines().length === spawns + 1)) && !!app.chat);
+type(app, 'slow one'); press(app, 'enter'); await sleep(100);
+must('the fake is answering: the chat is busy', !!app.chat?.busy);
+press(app, 'esc'); type(app, 'x');
+must('x mid-turn asks before killing the turn', app.modal?.kind === 'confirm' && app.modal.title.includes('mid-turn') && !!app.chat);
+press(app, 'esc');
+must('esc keeps the chat alive', app.modal === null && !!app.chat?.busy);
+type(app, 'e');
+const pickNote = app.modal?.kind === 'pick' ? app.modal.note ?? '' : '';
+must('e mid-turn says the change waits for the answer', app.modal?.kind === 'pick' && pickNote.includes('mid-turn'));
+const choice = app.modal?.kind === 'pick' ? app.modal.items.find((i) => i.value && i.value !== '__untrust' && !i.current)! : null;
+if (app.modal?.kind === 'pick' && choice) app.modal.index = app.modal.items.indexOf(choice);
+press(app, 'enter'); await settle();
+must('the restart is deferred: no new process yet', argvLines().length === spawns + 1 && !!app.chat && app.status.includes('applies when this answer finishes'));
+must('when the answer lands the chat restarts with the new effort', (await waitFor(() => argvLines().length === spawns + 2, 5000)) && argvLines()[spawns + 1]!.includes(`--effort ${choice?.value}`) && !!app.chat);
+type(app, 'i'); type(app, 'slow two'); press(app, 'enter'); await sleep(100); press(app, 'esc');
+type(app, 'q');
+must('q mid-turn asks instead of quitting', app.modal?.kind === 'confirm' && app.modal.title.includes('quit') && !!app.chat);
+press(app, 'esc');
+must('esc stays', app.modal === null && !!app.chat);
+must('the turn finishes', await waitFor(() => !app.chat?.busy, 5000));
+type(app, 'x');
+must('x on an idle chat stops it without asking', !app.chat && app.modal === null);
 press(app, 'esc'); await settle();
 must('esc volta ao projeto', app.view === 'project');
 press(app, 'esc'); await settle();
