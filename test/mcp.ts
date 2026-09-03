@@ -79,12 +79,14 @@ must('erro vira isError, não crash', res[1]?.result?.isError === true);
 must('servidor segue vivo depois do erro', res[2]?.result !== undefined);
 
 // --- project_search: the hive from db's point of view ---
-res = await session('db', [init, call(2, 'project_search', { query: 'chave_idem' }), call(3, 'project_search', { query: 'parcial' }), call(4, 'project_search', { query: 'idempotency', scope: 'transcripts' }), call(5, 'project_search', { query: 'nothing-like-this-anywhere' }), call(6, 'project_search', { query: '/[/' }), call(7, 'thread_list')]);
+res = await session('db', [init, call(2, 'project_search', { query: 'chave_idem' }), call(3, 'project_search', { query: 'parcial' }), call(4, 'project_search', { query: 'idempotency', scope: 'transcripts' }), call(5, 'project_search', { query: 'nothing-like-this-anywhere' }), call(6, 'project_search', { query: '/[/' }), call(7, 'thread_list'), call(8, 'note_write', { title: 'alias', body: 'written through body' }), call(9, 'note_write', { title: 'empty' })]);
 must('project_search finds what api said in the thread, wrapped as data', text(res[1]).includes('dm-api-db') && text(res[1]).includes('DATA') && !text(res[1]).includes('[you'));
 must('own posts come as [you], the decision note as note://', text(res[2]).includes('[you') && text(res[2]).includes('note://'));
 must('project_search reads the transcripts of the agents of the project', text(res[3]).includes('agent api') && text(res[3]).includes('idempotency key'));
 must('no match is an answer, not an error', text(res[4]).startsWith('No match') && !res[4]?.result?.isError);
 must('a broken regex is an error and the server survives', res[5]?.result?.isError === true && text(res[6]).includes('dm-api-db'));
+must('note_write accepts body as an alias of text', text(res[7]).startsWith('Created note://'));
+must('an empty note is refused', res[8]?.result?.isError === true && text(res[8]).includes('text'));
 
 console.log(fails ? `\n${fails} falha(s)` : '\ntudo verde');
 process.exit(fails ? 1 : 0);

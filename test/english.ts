@@ -8,7 +8,7 @@ must('t() fills placeholders in order', t('edit {0} of {1}', 2, 5) === 'edit 2 o
 const files: string[] = [];
 const walk = (d: string) => { for (const f of readdirSync(d)) { const p = join(d, f); if (statSync(p).isDirectory()) walk(p); else if (p.endsWith('.ts')) files.push(p); } };
 walk('src');
-const pt = /[áéíóúãõçêâô]|\b(não|você|ainda|nenhum|nenhuma|ligado|ligada|agente|nota|arquivo|serviço|projeto|página|tarefa|esperando|conversa|objetivo)\b/i;
+const pt = /[áéíóúãõçêâô]|\b(não|você|ainda|nenhum|nenhuma|ligado|ligada|agente|nota|arquivo|serviço|projeto|página|tarefa|esperando|conversa|objetivo|criada|vazia|ferramenta|desconhecida)\b/i;
 const bad: string[] = [];
 for (const f of files) {
   readFileSync(f, 'utf8').split('\n').forEach((line, i) => {

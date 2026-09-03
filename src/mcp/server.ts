@@ -59,7 +59,7 @@ const TOOLS: Tool[] = [
     schema: obj({}),
     async run() {
       const items = await bus.inbox(ME());
-      if (!items.length) return 'Caixa vazia.';
+      if (!items.length) return 'Inbox empty.';
       await bus.markRead(ME());
       return items.map((i) =>
         `[${i.thread} · turn ${i.turn}/${i.budget} · goal: ${i.goal}]\n${bus.untrusted(i.author, i.text)}`
@@ -157,14 +157,16 @@ const TOOLS: Tool[] = [
     description:
       'Creates a note in the project, already linked to you (you can read it with note_read). It shows on the ' +
       'Anthive map hanging from you. Use it to record context other agents should be able to read later.',
-    schema: obj({ title: str('short title'), text: str('content, markdown'), ttl: str('e.g. 2h, 1d; empty = persistent') }, ['title', 'text']),
+    schema: obj({ title: str('short title'), text: str('the note itself, markdown (body and content are accepted as aliases)'), body: str('alias of text'), ttl: str('e.g. 2h, 1d; empty = persistent') }, ['title']),
     async run(a) {
+      const text = String(a.text ?? a.body ?? a.content ?? '').trim();
+      if (!text) throw new Error('note_write needs the note text (text, body or content)');
       const p = await myProject();
       const d = await store.create({
-        kind: 'note', title: String(a.title), body: `${String(a.text)}\n`,
+        kind: 'note', title: String(a.title), body: `${text}\n`,
         acl: [ME()], ttl: store.parseTTL(a.ttl as string | undefined), project: p?.id,
       });
-      return `Criada note://${d.id}${p ? ` no projeto ${p.name}` : ' (outside any Anthive project)'}, linked to ${ME()}.`;
+      return `Created note://${d.id}${p ? ` in project ${p.name}` : ' (outside any Anthive project)'}, linked to ${ME()}.`;
     },
   },
   {
@@ -232,7 +234,7 @@ async function handle(req: Json) {
       });
     case 'tools/call': {
       const tool = TOOLS.find((t) => t.name === params?.name);
-      if (!tool) return fail(id, -32602, `ferramenta desconhecida: ${params?.name}`);
+      if (!tool) return fail(id, -32602, `unknown tool: ${params?.name}`);
       try {
         const text = await tool.run(params?.arguments ?? {});
         return reply(id, { content: [{ type: 'text', text }] });
