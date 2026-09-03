@@ -405,5 +405,5 @@ export function renderProject(g: Grid, v: View, selected: string | null, scroll:
     keybar(g, H - 2, [[`${G.tool} ${t('link')}`, `${name(src)} ${G.arrow} ${selected && selected !== src ? name(selected) : '…'}`], [t('arrows'), t('choose')], ['↵', t('confirm')], ['esc', t('cancel')]], '', `${G.tool} ${t('link')}`);
     return;
   }
-  keybar(g, H - 2, [['↑↓←→', t('navigate')], ['↵', t('open')], ['n', t('new')], ['l', t('link')], ['d', t('remove')], [']', t('panel')], ['esc', t('projects')], ['q', t('quit')]], status);
+  keybar(g, H - 2, [['↑↓←→', t('navigate')], ['↵', t('open')], ['n', t('new')], ['l', t('link')], ['d', t('remove')], ['s', t('select')], [']', t('panel')], ['esc', t('projects')], ['q', t('quit')]], status);
 }

@@ -190,6 +190,21 @@ must('esc stays', app.modal === null && !!app.chat);
 must('the turn finishes', await waitFor(() => !app.chat?.busy, 5000));
 type(app, 'x');
 must('x on an idle chat stops it without asking', !app.chat && app.modal === null);
+
+// --- s gives the mouse back to the terminal, and freezes the frame while you select ---
+type(app, 's');
+must('s freezes the screen and says how to come back', app.selecting && app.status.includes('frozen'));
+const frozen = app.grid.toString();
+app.status = 'anything else'; app.dirty = true; app.render();
+must('no new frame is drawn while selecting', app.grid.toString() === frozen);
+type(app, 'i');
+must('other keys do nothing while selecting', !app.composing && app.selecting);
+press(app, 'esc');
+must('esc gives the mouse back to the app', !app.selecting);
+app.render();
+app.showThinking = !app.showThinking; (app as any).rebuild(false); app.render();
+must('and the screen paints again', app.grid.toString() !== frozen);
+app.showThinking = !app.showThinking; (app as any).rebuild(false);
 press(app, 'esc'); await settle();
 must('esc volta ao projeto', app.view === 'project');
 press(app, 'esc'); await settle();

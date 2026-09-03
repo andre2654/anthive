@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `s` hands the mouse back to the terminal so you can select and copy with it, and freezes the frame while you do (a redraw would move the text under the selection). `s` or `esc` returns. `y` still copies the whole turn under the cursor.
+
 - Subagents on the map: the Agent calls of an agent's current turn hang under it as boxes with the description, what each one is doing (read from the files Claude Code keeps per subagent), tokens so far and state (running, done, failed, background, and silent when nothing was written for ten minutes: the process that ran it is gone). `↵` opens one as a read-only transcript that follows it live; the panel shows its brief. `project_map` lists them.
 - The agent's chat shows its subagents: a panel section with state, what each is doing, tokens and how long it has been quiet, and a live row that says how many are working instead of a bare `thinking…`. A subagent composing a long answer writes nothing until it lands, which used to look like a freeze.
 - A subagent whose session has no process behind it is marked `orphan` immediately (one `ps` per refresh, matched by session id), instead of looking busy for ten minutes. A running one shows how long it has been quiet once it passes a minute.

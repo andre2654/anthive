@@ -479,6 +479,20 @@ export class App {
       this.say(`copiado: ${[...text].length} caracteres`);
     } catch { this.say(t('pbcopy not available')); }
   }
+  /**
+   * s: the terminal takes the mouse back so you can select and copy with it.
+   * The screen freezes while you do, otherwise the next frame moves the text
+   * under the selection.
+   */
+  selecting = false;
+  toggleSelect() {
+    if (this.selecting) { this.selecting = false; this.screen.setMouse(true); this.say(t('selection off — the mouse is the app\'s again')); this.dirty = true; return; }
+    this.say(t('select with the mouse and copy — the screen is frozen; s or esc returns'), 3_600_000);
+    this.render();
+    this.selecting = true;
+    this.screen.setMouse(false);
+  }
+
   /** The transcript open is a subagent's: it is watched, never talked to. */
   private get watchOnly() { return !!this.agent?.id.startsWith('sub-'); }
 
@@ -668,6 +682,8 @@ export class App {
       if (k.k === 'mouse' && k.press && k.button === 0) { const h = this.grid.hitTest(k.x, k.y); if (h) { this.sel = h; this.dirty = true; if (h !== this.linking.source) void this.op(this.commitLink()); } return; }
       if (k.k === 'char' && k.c !== 'q') return;
     }
+    if (this.selecting) { if (k.k === 'esc' || (k.k === 'char' && (k.c === 's' || k.c === 'S'))) this.toggleSelect(); return; }
+    if (k.k === 'char' && k.c === 's' && !(this.view === 'agent' && this.composing) && !(this.view === 'browser' && this.typing)) return this.toggleSelect();
     if (k.k === 'char' && (k.c === 'q' || k.c === 'Q') && !(this.view === 'agent' && this.composing)) return this.askQuit();
 
     switch (this.view) {
@@ -782,6 +798,8 @@ export class App {
 
   // ------------------------------------------------------------ desenho
   render() {
+    if (this.selecting) return;   // frozen: a new frame would move the text under the selection
+
     if (this.statusUntil && Date.now() > this.statusUntil) { this.status = ''; this.statusUntil = 0; }
     if (this.grid.W !== this.screen.W || this.grid.H !== this.screen.H) { this.grid = new Grid(this.screen.W, this.screen.H); this.prev = null; this.screen.write('\x1b[2J'); if (this.view === 'agent') this.rebuild(false); }
     this.grid.clear();

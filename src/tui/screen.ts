@@ -15,6 +15,7 @@ export class Screen {
   private restored = false;
   private onResize?: () => void;
   private mouse = true;
+  private mouseOn = true;
 
   constructor(opts: { mouse?: boolean } = {}) {
     this.mouse = opts.mouse !== false;
@@ -24,6 +25,13 @@ export class Screen {
   measure() {
     this.W = Math.max(40, process.stdout.columns || 80);
     this.H = Math.max(12, process.stdout.rows || 24);
+  }
+
+  /** Mouse reporting off hands the mouse back to the terminal, so its own selection works. */
+  setMouse(on: boolean) {
+    if (!this.mouse || on === this.mouseOn) return;
+    this.mouseOn = on;
+    this.write(on ? MOUSE_ON : MOUSE_OFF);
   }
 
   enter(onResize: () => void) {
@@ -48,7 +56,7 @@ export class Screen {
   restore() {
     if (this.restored) return;
     this.restored = true;
-    process.stdout.write((this.mouse ? MOUSE_OFF : '') + CUR_ON + ALT_OFF);
+    process.stdout.write((this.mouse && this.mouseOn ? MOUSE_OFF : '') + CUR_ON + ALT_OFF);
     if (process.stdin.isTTY) try { process.stdin.setRawMode(false); } catch {}
     process.stdin.pause();
   }
