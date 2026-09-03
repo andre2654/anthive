@@ -759,7 +759,7 @@ export class App {
       // superfície opaca: apaga o rodapé que estava nessa linha, não só pinta o fundo
       g.panel({ x: 1, y: g.H - 2, w: g.W - 2, h: 1 }, [0x1c, 0x22, 0x2e]);
       g.put(2, g.H - 2, lab, C.link, [0x1c, 0x22, 0x2e]); g.put(2 + lab.length, g.H - 2, w.text, C.inkHi, [0x1c, 0x22, 0x2e]);
-      const hint = '↵ confirmar   esc cancelar';
+      const hint = '↵ confirm   esc cancel';
       g.put(g.W - 2 - hint.length, g.H - 2, hint, C.frame, [0x1c, 0x22, 0x2e]);
       g.cursor = { x: 2 + lab.length + w.cursorAt, y: g.H - 2 };
     }

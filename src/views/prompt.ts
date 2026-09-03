@@ -43,8 +43,8 @@ export function renderForm(g: Grid, form: Form, note?: string) {
 
   const f = form.fields[form.active]!;
   const keys = f.options?.length
-    ? `↵ confirm   tab completar   ↑↓ campo   esc cancel`
-    : `↵ confirm   ↑↓ campo   esc cancel`;
+    ? `↵ confirm   tab complete   ↑↓ field   esc cancel`
+    : `↵ confirm   ↑↓ field   esc cancel`;
   g.put(x + 2, ly, fit(keys, w - 4), C.frame, BG.panel);
 }
 
@@ -94,7 +94,7 @@ export function renderPick(g: Grid, title: string, items: PickItem[], index: num
   }
   let ly = y + items.length + 1;
   if (note) { g.put(x + 2, ly, fit(note, w - 4), C.frame, BG.panel); ly++; }
-  g.put(x + 2, ly, '↑↓ choose    ↵ aplicar   esc cancel', C.frame, BG.panel);
+  g.put(x + 2, ly, '↑↓ choose    ↵ apply   esc cancel', C.frame, BG.panel);
   g.cursor = null;
 }
 
