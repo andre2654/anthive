@@ -194,17 +194,16 @@ must('x on an idle chat stops it without asking', !app.chat && app.modal === nul
 // --- s gives the mouse back to the terminal, and freezes the frame while you select ---
 type(app, 's');
 must('s freezes the screen and says how to come back', app.selecting && app.status.includes('frozen'));
-const frozen = app.grid.toString();
-app.status = 'anything else'; app.dirty = true; app.render();
-must('no new frame is drawn while selecting', app.grid.toString() === frozen);
+const mark = 'marcaselecao';
+app.evs.push({ uuid: 'sel-1', parent: null, sidechain: false, type: 'assistant', ts: Date.now(), role: 'assistant', text: mark, full: mark } as any);
+(app as any).rebuild(true); app.render();
+must('no new frame is drawn while selecting', !app.grid.toString().includes(mark));
 type(app, 'i');
 must('other keys do nothing while selecting', !app.composing && app.selecting);
 press(app, 'esc');
 must('esc gives the mouse back to the app', !app.selecting);
 app.render();
-app.showThinking = !app.showThinking; (app as any).rebuild(false); app.render();
-must('and the screen paints again', app.grid.toString() !== frozen);
-app.showThinking = !app.showThinking; (app as any).rebuild(false);
+must('and the screen paints again', app.grid.toString().includes(mark));
 press(app, 'esc'); await settle();
 must('esc volta ao projeto', app.view === 'project');
 press(app, 'esc'); await settle();
