@@ -97,6 +97,15 @@ const g3 = new Grid(130, 32); renderProject(g3, v3, null, 0, '', {});
 must('ten minutes without a line: silent, drawn as stuck', quiet?.kind === 'sub' && quiet.sub.silent && g3.toString().includes('✕ silent for 15m'));
 await utimes(sub, new Date(), new Date());
 
+// --- in the agent's chat: the subagents are a panel section and they carry the "now" line ---
+const { subsLine } = await import('../src/views/agent.ts');
+must('the now line names them and shows the longest silence', subsLine([
+  { name: 'CVM', state: 'running', tokens: 20000, quietMs: 300_000, now: 'Write report' },
+  { name: 'Tax', state: 'running', tokens: 18000, quietMs: 30_000, now: 'search x' },
+  { name: 'Market', state: 'done', tokens: 6000, quietMs: 0, now: '' },
+]).includes('2 subagents') === true);
+must('with none alive the now line stays out of the way', subsLine([{ name: 'CVM', state: 'done', tokens: 1, quietMs: 0, now: '' }]) === '');
+
 // --- no process behind the session: its subagents are orphans, right away ---
 process.env.ANTHIVE_FAKE_PS = 'claude --resume 99999999-9999-4999-8999-999999999999';
 const vGone = await P.view(p);
@@ -136,6 +145,17 @@ must('the view says it is read-only and offers no input', w.includes('watching')
 must('starting a chat on a subagent is refused', stops === 0 && app.status.includes('watch only'));
 app.sel = 'sub-A1'; (app as any).removeSel();
 must('a subagent cannot be removed from the map', app.modal === null && app.status.includes('ends by itself'));
+app.sel = agent.id; await app.openSel();
+app.showPanel = true; app.render();
+const chat = app.grid.toString();
+must('the agent chat gives the subagents their own panel section', chat.includes('subagents (3)') && chat.includes('CVM rules') && chat.includes('search CVM 88') && chat.includes('background'));
+const quietAt = new Date(Date.now() - 3 * 60_000);
+await utimes(sub, quietAt, quietAt);
+app.pv = await P.view(p); app.render();
+const quietChat = app.grid.toString();
+must('a running subagent that went quiet says so, without calling it dead', quietChat.includes('quiet for 3m') && !quietChat.includes('orphan'));
+await utimes(sub, new Date(), new Date());
+must('and the live row says how many are working instead of just thinking', chat.includes('2 subagents') || chat.includes('1 subagent'));
 
 // --- a pending permission request is the only "approval" ---
 void A.ask({ agent: 'maestro', project: p.id, cwd, tool: 'Bash', input: { command: 'rm -rf build' } }, { timeoutMs: 5000, pollMs: 50 });

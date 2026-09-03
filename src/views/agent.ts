@@ -158,12 +158,26 @@ export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), wid
 }
 
 const hhmm = (ts: number) => (ts ? new Date(ts).toTimeString().slice(0, 8) : '');
-export interface Live { model: string; effort: string; permissionMode: string; busy: boolean; thinking: number; summary: string; cost: number; deep?: boolean }
+export interface SubChip { name: string; state: 'running' | 'done' | 'failed' | 'background' | 'orphan'; tokens: number; quietMs: number; now: string }
+export interface Live { model: string; effort: string; permissionMode: string; busy: boolean; thinking: number; summary: string; cost: number; deep?: boolean; subs?: SubChip[] }
+const SUB_MARK: Record<SubChip['state'], { glyph: string; color: RGB }> = {
+  running: { glyph: G.running, color: C.run }, done: { glyph: G.idle, color: C.dim }, failed: { glyph: G.stuck, color: C.dead },
+  background: { glyph: G.waiting, color: C.hold }, orphan: { glyph: G.stuck, color: C.dead },
+};
+/** What the "now" line says while subagents carry the turn: they can write nothing for minutes while composing a long answer. */
+export function subsLine(subs: SubChip[]): string {
+  const live = subs.filter((s) => s.state === 'running' || s.state === 'background');
+  if (!live.length) return '';
+  const done = subs.length - live.length;
+  const quiet = Math.max(...live.map((s) => s.quietMs));
+  const total = subs.reduce((n, s) => n + s.tokens, 0);
+  return `${live.length} ${live.length > 1 ? t('subagents') : t('subagent')}${done ? `  ${G.h}  ${t('{0} done', done)}` : ''}  ${G.h}  ${tok(total)}  ${G.h}  ${t('quietest {0}', ago(quiet))}`;
+}
 export interface LinkChip { glyph: string; label: string; color: RGB }
 export interface PanelData {
   context: number; window: number; model: string; effort: string; perm: string;
   events: number; burn: number; cost: number; compactions: number; thinkingBlocks: number; showThinking: boolean;
-  links: LinkChip[]; tasks: Task[]; state: string;
+  links: LinkChip[]; tasks: Task[]; state: string; subs: SubChip[];
 }
 
 function drawPanel(g: Grid, x: number, top: number, bottom: number, p: PanelData) {
@@ -187,6 +201,17 @@ function drawPanel(g: Grid, x: number, top: number, bottom: number, p: PanelData
   head(t('links'));
   if (!p.links.length) line(t('none — l links'));
   for (const c of p.links) line(`${c.glyph} ${c.label}`, c.color);
+  if (p.subs.length) {
+    y++;
+    head(`${t('subagents')} (${p.subs.length})`);
+    for (const s of p.subs) {
+      const m = SUB_MARK[s.state];
+      line(`${m.glyph} ${s.name}`, m.color);
+      const what = s.state === 'running' ? (s.now || t('starting')) : t(s.state);
+      line(`  ${fit(what, Math.max(6, w - 12))}${s.tokens ? `  ${tok(s.tokens)}` : ''}`, C.dim);
+      if (s.state === 'running' && s.quietMs > 60_000) line(`  ${t('quiet for {0} — a long answer writes nothing until it lands', ago(s.quietMs))}`, C.frame);
+    }
+  }
   y++;
   head(t('tasks'));
   if (!p.tasks.length) line(t('none in this session'));
@@ -260,7 +285,7 @@ export function renderAgent(
     g.put(2, y, pad(r.connector, connW), C.frame); g.put(2 + connW, y, r.glyph, r.gc);
     if (r.name) g.put(nameX, y, pad(r.name, nameW - 1), on && r.kind !== 'turn' ? C.inkHi : r.nc, band);
     let detail = r.detail, dc = r.dc;
-    if (r.kind === 'now' && live?.busy) { detail = live.thinking ? `${t('thinking')}${G.ell} ${tok(live.thinking)}` : live.summary || `${t('thinking')}${G.ell}`; dc = C.run; }
+    if (r.kind === 'now' && live?.busy) { const sl = live.subs ? subsLine(live.subs) : ''; detail = sl || (live.thinking ? `${t('thinking')}${G.ell} ${tok(live.thinking)}` : live.summary || `${t('thinking')}${G.ell}`); dc = C.run; }
     if (r.spans && !on) { let sx = detailX; for (const sp of r.spans) { g.put(sx, y, fit(sp.text, Math.max(0, detailX + detailW - sx)), sp.color, band); sx += [...sp.text].length; if (sx >= detailX + detailW) break; } }
     else g.put(detailX, y, fit(detail, detailW), on ? C.inkHi : dc, band);
     if (r.right) g.put(rightEdge - 3 - timeW - tokW, y, padStart(r.right, tokW), C.frame);

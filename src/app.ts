@@ -12,7 +12,7 @@ import { supportsKittyGraphics, placeImage, clearImages } from './tui/image.ts';
 import { LiveView } from './core/live.ts';
 import { BrowserMode, fitImage, toPage, inBox } from './core/cdp.ts';
 import { modeLabel } from './views/item.ts';
-import { renderAgent, rows, Row, INPUT_H, LinkChip, detailWidth, tasksFrom, PanelData, panelFits, inputLayout } from './views/agent.ts';
+import { renderAgent, rows, Row, INPUT_H, LinkChip, detailWidth, tasksFrom, PanelData, panelFits, inputLayout, SubChip } from './views/agent.ts';
 import * as P from './core/project.ts';
 import * as A from './core/approvals.ts';
 import * as store from './core/store.ts';
@@ -436,15 +436,21 @@ export class App {
     const out: LinkChip[] = [];
     for (const e of this.pv.edges) {
       const other = e.from === this.agent.id ? e.to : e.to === this.agent.id ? e.from : null; if (!other) continue;
-      const n = this.node(other); if (!n) continue;
+      const n = this.node(other); if (!n || n.kind === 'sub') continue;   // subagents have their own section
       const st = e.thread ? store.threadState(e.thread) : null;
-      out.push({ glyph: n.kind === 'agent' ? G.swap : KIND_GLYPH[n.kind], label: n.kind === 'agent' && st ? `${n.name} ${st.turn}/${st.budget}` : nodeLabel(n), color: n.kind === 'agent' ? C.link : n.kind === 'note' ? C.link : n.kind === 'service' ? C.run : n.kind === 'task' ? C.hold : n.kind === 'sub' ? C.run : n.kind === 'browser' ? C.run : C.ink });
+      out.push({ glyph: n.kind === 'agent' ? G.swap : KIND_GLYPH[n.kind], label: n.kind === 'agent' && st ? `${n.name} ${st.turn}/${st.budget}` : nodeLabel(n), color: n.kind === 'agent' ? C.link : n.kind === 'note' ? C.link : n.kind === 'service' ? C.run : n.kind === 'task' ? C.hold : n.kind === 'browser' ? C.run : C.ink });
     }
     return out;
   }
   /** A model/effort/permission change asked mid-turn: applied by a restart when the answer arrives. */
   private pendingPatch: Partial<Pick<ChatSession, 'model' | 'effort' | 'permissionMode'>> | null = null;
-  private get live() { const c = this.chat; return c ? { model: c.model, effort: c.effort, permissionMode: c.permissionMode, deep: c.deep, busy: c.busy, thinking: c.thinking, summary: c.summary, cost: c.cost } : null; }
+  private get live() { const c = this.chat; return c ? { model: c.model, effort: c.effort, permissionMode: c.permissionMode, deep: c.deep, busy: c.busy, thinking: c.thinking, summary: c.summary, cost: c.cost, subs: this.subChips() } : null; }
+  /** The subagents of the open agent, as the map read them from their own files. */
+  private subChips(): SubChip[] {
+    if (!this.pv || !this.agent) return [];
+    return this.pv.nodes.filter((n): n is P.SubNode => n.kind === 'sub' && n.agent === this.agent!.id)
+      .map(({ sub: s }) => ({ name: s.name, state: s.error ? 'failed' as const : s.done ? 'done' as const : s.orphan ? 'orphan' as const : s.bg ? 'background' as const : 'running' as const, tokens: s.tokens, quietMs: s.ageMs === Infinity ? Math.max(0, Date.now() - s.started) : s.ageMs, now: s.now }));
+  }
 
   /** O painel direito: o que vale saber do agente sem sair da conversa. */
   private panelData(): PanelData | null {
@@ -457,7 +463,7 @@ export class App {
       model: this.chat?.model || s?.model || '', effort: this.chat?.effort || s?.effort || '', perm: this.chat?.permissionMode || '',
       events: this.evs.length, burn: this.evs.reduce((n, e) => n + (e.usage?.output ?? 0), 0), cost: this.chat?.cost ?? 0,
       compactions: this.evs.filter((e) => e.isCompact).length, thinkingBlocks: this.evs.filter((e) => e.thinking).length, showThinking: this.showThinking,
-      links: this.chips(), tasks: tasksFrom(this.evs), state,
+      links: this.chips(), tasks: tasksFrom(this.evs), state, subs: this.subChips(),
     };
   }
 

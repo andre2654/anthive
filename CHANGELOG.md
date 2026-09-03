@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Subagents on the map: the Agent calls of an agent's current turn hang under it as boxes with the description, what each one is doing (read from the files Claude Code keeps per subagent), tokens so far and state (running, done, failed, background, and silent when nothing was written for ten minutes: the process that ran it is gone). `↵` opens one as a read-only transcript that follows it live; the panel shows its brief. `project_map` lists them.
+- The agent's chat shows its subagents: a panel section with state, what each is doing, tokens and how long it has been quiet, and a live row that says how many are working instead of a bare `thinking…`. A subagent composing a long answer writes nothing until it lands, which used to look like a freeze.
 - A subagent whose session has no process behind it is marked `orphan` immediately (one `ps` per refresh, matched by session id), instead of looking busy for ten minutes. A running one shows how long it has been quiet once it passes a minute.
 - Fixed: opening a subagent's transcript killed the chat that was running it (it looked like switching agents). Watching is read-only now: no input box, the parent's events stay in the parent's tree, and the chat keeps running.
 - Mid-turn guards: `x` and `q` ask before killing a chat that is still answering (naming the live subagents), and `m`/`e`/`p` changes asked mid-turn wait for the answer before the restart, instead of losing the turn and its subagents.
