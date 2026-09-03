@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Approvals on the map: permission prompts of every agent arrive as a modal (`y` once, `a` always as a remembered rule, `l` allow and link the file, `n` deny); rules and linked files answer by themselves.
 - Deep search in the agent chat: `D` / Tab `[deep]` sends a research turn (Explore subagents over the repo, `project_search` over the hive, WebSearch/WebFetch on the web, report saved as a `research:` note); subagent progress streams into the tree.
 - `project_search` bus tool: notes, threads and the transcripts of the project's agents, ACL-aware, grouped by source; deep search runs at effort `max`, with no spending cap unless `ANTHIVE_DEEP_BUDGET_USD` is set.
 - Fixed: restarting a chat (model/effort/permissions) no longer closes it when the old process exits.

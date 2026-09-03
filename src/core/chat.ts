@@ -70,6 +70,7 @@ export interface ChatOpts {
   agent?: string;          // nome no barramento, vira ANTHIVE_AGENT
   browser?: boolean;       // ligado a um browser do projeto: autoriza mcp__playwright e instrui
   deep?: boolean;          // deep search: web tools, subagent progress and the research protocol
+  allow?: string[];        // remembered rules of this agent, as Claude Code patterns (Bash(prefix:*))
 }
 
 export interface RateWindow { fiveHour: number; sevenDay: number; resetsAt: number; seenAt?: number }
@@ -133,7 +134,9 @@ export class ChatSession {
     // --allowedTools é variádico (engole tudo até a próxima flag): aqui não há prompt posicional, mas vai antes das outras flags por garantia
     const sys = [SYSTEM_PREAMBLE, this.opts.browser ? BROWSER_PREAMBLE : '', this.deep ? DEEP_PREAMBLE : ''].filter(Boolean).join(' ');
     const a = ['claude', '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--append-system-prompt', sys,
-      '--allowedTools', 'mcp__anthive', ...(this.opts.browser ? ['mcp__playwright'] : []), ...(this.deep ? DEEP_TOOLS : [])];
+      '--allowedTools', 'mcp__anthive', ...(this.opts.browser ? ['mcp__playwright'] : []), ...(this.deep ? DEEP_TOOLS : []), ...(this.opts.allow ?? []),
+      // anything else asks — and the question lands on the map instead of being refused
+      '--permission-prompt-tool', 'mcp__anthive__permission_prompt'];
     if (this.deep) {
       a.push('--forward-subagent-text');   // subagent progress reaches the stream (parent_tool_use_id → indented rows)
       const budget = Number(process.env.ANTHIVE_DEEP_BUDGET_USD ?? 0);
@@ -147,7 +150,7 @@ export class ChatSession {
   }
 
   start() {
-    const env: Record<string, string> = { ...process.env as Record<string, string>, ANTHIVE_HOME: ROOT };
+    const env: Record<string, string> = { ...process.env as Record<string, string>, ANTHIVE_HOME: ROOT, MCP_TOOL_TIMEOUT: process.env.MCP_TOOL_TIMEOUT ?? '900000' };   // a permission request may wait for the user
     if (this.opts.agent) env.ANTHIVE_AGENT = this.opts.agent;
     const proc = Bun.spawn(this.argv(), {
       cwd: this.opts.cwd, env, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe',

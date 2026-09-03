@@ -12,6 +12,7 @@ import * as store from '../core/store.ts';
 import * as bus from '../core/bus.ts';
 import { listProjects, loadGraph, view as projectView, Project } from '../core/project.ts';
 import { searchProject, formatHits, Scope } from '../core/search.ts';
+import * as approvals from '../core/approvals.ts';
 
 /** O projeto deste agente: pelo nome registrado, senão pelo diretório em que o servidor subiu. */
 async function myProject(): Promise<Project | null> {
@@ -205,6 +206,18 @@ const TOOLS: Tool[] = [
       const scope = ['all', 'notes', 'threads', 'transcripts'].includes(String(a.scope)) ? (String(a.scope) as Scope) : 'all';
       const r = await searchProject(p, ME(), { query: String(a.query ?? ''), scope, limit: Number(a.limit) || undefined });
       return formatHits(r, ME(), String(a.query ?? ''), bus.untrusted);
+    },
+  },
+  {
+    name: 'permission_prompt',
+    description: 'Claude Code sends its permission prompts here. A remembered rule or a linked file answers on the spot; otherwise the user answers on the map. Not for agents to call.',
+    schema: { type: 'object', properties: { tool_name: str('the tool asking'), input: { type: 'object', description: 'its input' }, tool_use_id: str('id of the call') }, required: ['tool_name'], additionalProperties: true },
+    async run(a) {
+      const p = await myProject();
+      const req = { agent: ME(), project: p?.id ?? null, cwd: p?.cwd ?? process.cwd(), tool: String(a.tool_name ?? ''), input: ((a.input ?? a.tool_input ?? {}) as Record<string, unknown>), toolUseId: a.tool_use_id ? String(a.tool_use_id) : undefined };
+      const auto = p ? approvals.autoDecide(req, await loadGraph(p.id)) : null;
+      const d = auto ?? await approvals.ask(req, { timeoutMs: Number(process.env.ANTHIVE_APPROVAL_TIMEOUT ?? 900_000) });
+      return JSON.stringify(d.state === 'allow' ? { behavior: 'allow', updatedInput: req.input } : { behavior: 'deny', message: `Denied in Anthive${d.reason ? `: ${d.reason}` : ''}. Ask the user, or work another way.` });
     },
   },
 ];

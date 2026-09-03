@@ -47,6 +47,7 @@ if (cmd === '--help' || cmd === '-h' || cmd === 'help') {
   anthive mcp           run the MCP server (agents call this; you don't)
 
   env: ANTHIVE_HOME (data dir, default ~/.anthive)  ANTHIVE_DEEP_BUDGET_USD (cap a deep search process)
+       ANTHIVE_APPROVAL_TIMEOUT (ms a permission request waits for you, default 900000)
        ANTHIVE_CLAUDE_PROJECTS (where Claude Code keeps transcripts, default ~/.claude/projects)`);
   process.exit(0);
 }

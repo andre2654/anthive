@@ -88,5 +88,17 @@ must('a broken regex is an error and the server survives', res[5]?.result?.isErr
 must('note_write accepts body as an alias of text', text(res[7]).startsWith('Created note://'));
 must('an empty note is refused', res[8]?.result?.isError === true && text(res[8]).includes('text'));
 
+// --- permission_prompt: a rule answers alone; without one, the map answers ---
+const A = await import('../src/core/approvals.ts');
+await P.addRule(project.id, { agent: 'api', tool: 'Bash', prefix: 'git log' });
+res = await session('api', [init, call(2, 'permission_prompt', { tool_name: 'Bash', input: { command: 'git log --oneline' }, tool_use_id: 't1' })]);
+must('a remembered rule allows on the spot, with the input echoed back', JSON.parse(text(res[1])).behavior === 'allow' && JSON.parse(text(res[1])).updatedInput.command === 'git log --oneline');
+const waiting = session('api', [init, call(2, 'permission_prompt', { tool_name: 'Bash', input: { command: 'python3 scripts/x.py --painel' } })]);
+let req: any = null; for (let i = 0; i < 60 && !req; i++) { await new Promise((r) => setTimeout(r, 100)); req = (await A.pending(project.id))[0] ?? null; }
+must('an unknown command waits on disk for the user', !!req && req.agent === 'api' && req.tool === 'Bash');
+if (req) await A.decide(req.id, 'deny', 'the user said no');
+res = await waiting;
+must('the user\'s no becomes a deny with a message', JSON.parse(text(res[1])).behavior === 'deny' && /Anthive/.test(JSON.parse(text(res[1])).message));
+
 console.log(fails ? `\n${fails} falha(s)` : '\ntudo verde');
 process.exit(fails ? 1 : 0);

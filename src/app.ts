@@ -2,7 +2,7 @@ import { Grid } from './tui/grid.ts';
 import { Screen, Key } from './tui/screen.ts';
 import { C, G, tok } from './tui/theme.ts';
 import { TextInput, Form } from './tui/input.ts';
-import { renderForm, renderConfirm, renderPick, PickItem } from './views/prompt.ts';
+import { renderForm, renderConfirm, renderPick, renderApproval, PickItem } from './views/prompt.ts';
 import { renderHome, layoutHome } from './views/home.ts';
 import { renderProject, layoutProject, KIND_GLYPH } from './views/project.ts';
 import { renderNote, renderFile, renderService, renderTask } from './views/item.ts';
@@ -14,6 +14,7 @@ import { BrowserMode, fitImage, toPage, inBox } from './core/cdp.ts';
 import { modeLabel } from './views/item.ts';
 import { renderAgent, rows, Row, INPUT_H, LinkChip, detailWidth, tasksFrom, PanelData, panelFits, inputLayout } from './views/agent.ts';
 import * as P from './core/project.ts';
+import * as A from './core/approvals.ts';
 import * as store from './core/store.ts';
 import { ROOT } from './core/store.ts';
 import * as bus from './core/bus.ts';
@@ -28,7 +29,8 @@ type ViewName = 'home' | 'project' | 'agent' | 'note' | 'file' | 'service' | 'ta
 type Modal =
   | { kind: 'form'; form: Form; note?: string; submit: (v: string[]) => Promise<string> }
   | { kind: 'confirm'; title: string; lines: string[]; ok: () => Promise<string> }
-  | { kind: 'pick'; title: string; items: PickItem[]; index: number; note?: string; submit: (v: string) => Promise<string> };
+  | { kind: 'pick'; title: string; items: PickItem[]; index: number; note?: string; submit: (v: string) => Promise<string> }
+  | { kind: 'approval'; req: A.Request; linkable: string | null };
 
 const nodeLabel = (n: P.Node) => n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.kind === 'browser' ? 'browser' : n.item.name;
 
@@ -50,6 +52,7 @@ export class App {
   agent: P.AgentNode | null = null; evs: Ev[] = []; rowsAll: Row[] = []; aScroll = 0; aCursor = -1; expanded = new Set<string>();
   chat: ChatSession | null = null; composing = false; chatInput = new TextInput(); prefs = { model: '', effort: '', permissionMode: '' };
   showThinking = false; showPanel = true;
+  snoozed = new Set<string>();   // permission requests the user postponed with esc
   deep = false;   // the [deep] chip of the input box: the next turn is a deep search
   // itens
   note: store.Doc | null = null; noteScroll = 0;
@@ -72,6 +75,7 @@ export class App {
     }
     if (this.project) {
       this.pv = await P.view(this.project);
+      await this.pollApprovals();
       if (this.sel && !this.pv.nodes.some((n) => n.id === this.sel)) this.sel = this.pv.nodes[0]?.id ?? null;
       if (!this.sel) this.sel = this.pv.nodes[0]?.id ?? null;
       await this.applyBriefings();
@@ -186,6 +190,29 @@ export class App {
     if (n.kind === 'task') { this.task = n; this.view = 'task'; }
     if (n.kind === 'browser') { this.browser = n; this.typing = false; this.view = 'browser'; void this.op(this.openLive(n.item)); }
     this.dirty = true;
+  }
+
+  /** A permission request from an agent of this project becomes a modal (bell included); esc postpones it. */
+  async pollApprovals() {
+    if (!this.project || this.modal) return;
+    const next = (await A.pending(this.project.id)).find((r) => !this.snoozed.has(r.id));
+    if (!next) return;
+    const g = await P.loadGraph(this.project.id);
+    const linkable = await A.fileIn(next, A.linkedFiles(g, next.agent));
+    this.modal = { kind: 'approval', req: next, linkable };
+    this.screen.write('\x07'); this.dirty = true;
+  }
+  /** y/a/l/n on a request: allow, allow and remember the rule, allow and link the file it touches, deny. */
+  async answer(req: A.Request, how: 'allow' | 'always' | 'link' | 'deny', linkable: string | null): Promise<string> {
+    const pid = this.project?.id;
+    if (how === 'deny') { await A.decide(req.id, 'deny', 'the user said no'); return t('denied {0}', req.tool); }
+    if (how === 'always' && pid) { const prefix = A.prefixOf(req.tool, req.input); await P.addRule(pid, { agent: req.agent, tool: req.tool, prefix }); await A.decide(req.id, 'allow', `rule: ${prefix}`); await this.load(); return t('allowed, and remembered: {0}', `${req.tool}(${prefix}:*)`); }
+    if (how === 'link' && pid && linkable) {
+      const g = await P.loadGraph(pid); const ag = g.items.find((i) => i.kind === 'agent' && i.name === req.agent);
+      const f = await P.addFile(pid, linkable); if (ag) await P.link(pid, ag.id, f.id);
+      await A.decide(req.id, 'allow', `linked file: ${f.label}`); await this.load(); return t('allowed, and {0} is now linked to {1}', f.label, req.agent);
+    }
+    await A.decide(req.id, 'allow', 'the user allowed it once'); return t('allowed once: {0}', A.summary(req.tool, req.input).slice(0, 60));
   }
 
   /** Anthive writes into the user's repos (.mcp.json, .git/info/exclude): ask once, remember in ~/.anthive/settings.json. */
@@ -445,7 +472,8 @@ export class App {
     // o barramento tem que existir no diretório ANTES do processo subir: é lido na partida
     try { const bus = await P.ensureBus(a.cwd); if (bus !== 'unchanged') this.say(t('bus {0} in .mcp.json — note_write, project_map and the rest work here now', bus === 'new' ? t('new') : t('updated')), 6000); }
     catch (e) { this.say(t('could not write .mcp.json: {0}', (e as Error).message), 6000); }
-    this.chat = new ChatSession({ cwd: a.cwd, resume: a.session ? sid : undefined, sessionId: a.session ? undefined : sid, agent: a.item?.name, browser, deep: this.deep,
+    const allow = this.project && a.item ? P.rulesFor(await P.loadGraph(this.project.id), a.item.name) : [];
+    this.chat = new ChatSession({ cwd: a.cwd, resume: a.session ? sid : undefined, sessionId: a.session ? undefined : sid, agent: a.item?.name, browser, deep: this.deep, allow,
       model: this.prefs.model || undefined, effort: this.prefs.effort || (this.deep ? DEEP_EFFORT : undefined), permissionMode: this.prefs.permissionMode || undefined }, (e) => this.onChat(e));
     this.chat.start();
   }
@@ -550,6 +578,15 @@ export class App {
     if (k.k === 'winpx') return;
     if (this.modal) {
       const m = this.modal;
+      if (m.kind === 'approval') {
+        const go = (how: 'allow' | 'always' | 'link' | 'deny') => { const { req, linkable } = m; void this.runModal(() => this.answer(req, how, linkable)); };
+        if (k.k === 'char' && 'yY'.includes(k.c)) go('allow');
+        else if (k.k === 'char' && 'aA'.includes(k.c)) go('always');
+        else if (k.k === 'char' && 'lL'.includes(k.c) && m.linkable) go('link');
+        else if (k.k === 'char' && 'nN'.includes(k.c)) go('deny');
+        else if (k.k === 'esc') { this.snoozed.add(m.req.id); this.modal = null; this.say(t('later — the agent keeps waiting; the request comes back on the next open'), 5000); }
+        this.dirty = true; return;
+      }
       if (m.kind === 'confirm') { if (k.k === 'char' && 'sSy'.includes(k.c)) void this.runModal(m.ok); else if (k.k === 'esc' || (k.k === 'char' && 'nN'.includes(k.c))) { this.modal = null; this.dirty = true; } return; }
       if (m.kind === 'pick') {
         const n = m.items.length;
@@ -715,6 +752,7 @@ export class App {
 
     if (this.modal?.kind === 'form') renderForm(g, this.modal.form, this.modal.note);
     else if (this.modal?.kind === 'confirm') renderConfirm(g, this.modal.title, this.modal.lines);
+    else if (this.modal?.kind === 'approval') renderApproval(g, this.modal.req.agent, this.modal.req.tool, A.summary(this.modal.req.tool, this.modal.req.input), { linkable: this.modal.linkable ? basename(this.modal.linkable) : null, prefix: A.prefixOf(this.modal.req.tool, this.modal.req.input) });
     else if (this.modal?.kind === 'pick') renderPick(g, this.modal.title, this.modal.items, this.modal.index, this.modal.note);
     else if (this.inline) {
       const lab = `${this.inline.label} › `; const w = this.inline.input.window(Math.max(8, g.W - lab.length - 26));

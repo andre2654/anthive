@@ -139,6 +139,20 @@ press(app, 'esc'); type(app, 'D');
 must('D opens the box in deep mode', app.composing && app.deep);
 press(app, 'esc'); type(app, 'x');
 must('x stops the chat', !app.chat);
+
+// --- approvals: a pending request becomes a modal; y allows, a remembers the rule ---
+const A = await import('../src/core/approvals.ts');
+const ask1 = A.ask({ agent: 'api', project: app.project!.id, cwd: app.project!.cwd, tool: 'Bash', input: { command: 'python3 scripts/ler.py --painel' } }, { timeoutMs: 8000, pollMs: 50 });
+await new Promise((r) => setTimeout(r, 120)); await app.load();
+must('a pending request opens the approval modal', app.modal?.kind === 'approval' && app.modal.req.tool === 'Bash');
+type(app, 'y'); await settle();
+must('y allows once and closes the modal', (await ask1).state === 'allow' && app.modal === null);
+const ask2 = A.ask({ agent: 'api', project: app.project!.id, cwd: app.project!.cwd, tool: 'Bash', input: { command: 'python3 scripts/ler.py --painel' } }, { timeoutMs: 8000, pollMs: 50 });
+await new Promise((r) => setTimeout(r, 120)); await app.load();
+type(app, 'a'); await settle();
+must('a allows and remembers the rule for the agent', (await ask2).state === 'allow' && P.rulesFor(await P.loadGraph(app.project!.id), 'api').includes('Bash(python3 scripts/ler.py:*)'));
+const g5 = await P.loadGraph(app.project!.id);
+must('the remembered rule answers by itself next time', A.autoDecide({ agent: 'api', tool: 'Bash', input: { command: 'python3 scripts/ler.py --outro' }, cwd: app.project!.cwd }, g5)?.state === 'allow');
 press(app, 'esc'); await settle();
 must('esc volta ao projeto', app.view === 'project');
 press(app, 'esc'); await settle();

@@ -31,7 +31,9 @@ export type StoredItem = AgentItem | FileItem | ServiceItem | BrowserItem;
 
 /** Ligação genérica. Agente↔agente é conversa (store); agente→nota é ACL (store). O resto mora aqui. */
 export interface Link { from: string; to: string; created: number }
-export interface Graph { items: StoredItem[]; links: Link[] }
+/** "Always allow" remembered per agent: Bash commands by prefix, other tools by path. */
+export interface Rule { agent: string; tool: string; prefix: string; created: number }
+export interface Graph { items: StoredItem[]; links: Link[]; rules?: Rule[] }
 
 const REG = () => join(ROOT, 'projects.json');
 const GRAPH = (id: string) => join(ROOT, 'projects', `${id}.json`);
@@ -102,6 +104,15 @@ export async function homeCards(): Promise<ProjectCard[]> {
 export async function loadGraph(id: string): Promise<Graph> {
   try { return JSON.parse(await readFile(GRAPH(id), 'utf8')); } catch { return { items: [], links: [] }; }
 }
+export async function addRule(pid: string, rule: Omit<Rule, 'created'>) {
+  const g = await loadGraph(pid);
+  g.rules ??= [];
+  if (!g.rules.some((r) => r.agent === rule.agent && r.tool === rule.tool && r.prefix === rule.prefix)) g.rules.push({ ...rule, created: Date.now() });
+  await saveGraph(pid, g);
+}
+/** The remembered rules of an agent as Claude Code allow patterns, for the process allowlist. */
+export const rulesFor = (g: Graph, agent: string): string[] => (g.rules ?? []).filter((r) => r.agent === agent).map((r) => `${r.tool}(${r.prefix}:*)`);
+
 export async function saveGraph(id: string, g: Graph) {
   await mkdir(join(ROOT, 'projects'), { recursive: true });
   await writeFile(GRAPH(id), JSON.stringify(g, null, 2), 'utf8');
@@ -317,7 +328,7 @@ export async function addAgent(p: Project, name: string, opts: { worktree?: stri
  */
 export function firstTurnPlan(a: AgentItem, prompt: string, needsInit: boolean, browser = false): string[][] {
   // --allowedTools é variádico: fica ANTES de --session-id/--resume, que encerram a lista; o prompt vem sempre por último
-  const base = ['claude', '-p', '--append-system-prompt', browser ? `${SYSTEM_PREAMBLE} ${BROWSER_PREAMBLE}` : SYSTEM_PREAMBLE, '--allowedTools', 'mcp__anthive', ...(browser ? ['mcp__playwright'] : [])];
+  const base = ['claude', '-p', '--append-system-prompt', browser ? `${SYSTEM_PREAMBLE} ${BROWSER_PREAMBLE}` : SYSTEM_PREAMBLE, '--allowedTools', 'mcp__anthive', ...(browser ? ['mcp__playwright'] : []), '--permission-prompt-tool', 'mcp__anthive__permission_prompt'];
   if (!needsInit) return [[...base, '--session-id', a.sessionId!, prompt]];
   return [
     [...base, '--session-id', a.sessionId!, '--permission-mode', 'acceptEdits', '/init'],

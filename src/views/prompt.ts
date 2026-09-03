@@ -43,8 +43,8 @@ export function renderForm(g: Grid, form: Form, note?: string) {
 
   const f = form.fields[form.active]!;
   const keys = f.options?.length
-    ? `↵ confirmar   tab completar   ↑↓ campo   esc cancelar`
-    : `↵ confirmar   ↑↓ campo   esc cancelar`;
+    ? `↵ confirm   tab completar   ↑↓ campo   esc cancel`
+    : `↵ confirm   ↑↓ campo   esc cancel`;
   g.put(x + 2, ly, fit(keys, w - 4), C.frame, BG.panel);
 }
 
@@ -62,13 +62,13 @@ export function renderConfirm(g: Grid, title: string, lines: string[]) {
   for (let i = 0; i < lines.length; i++) {
     g.put(x + 2, y + 1 + i, fit(lines[i]!, w - 4), i === 0 ? C.inkHi : C.dim, BG.panel);
   }
-  g.put(x + 2, y + h - 2, 's confirmar   n / esc cancelar', C.frame, BG.panel);
+  g.put(x + 2, y + h - 2, 'y confirm   n / esc cancel', C.frame, BG.panel);
   g.cursor = null;
 }
 
 export interface PickItem { value: string; label: string; hint?: string; current?: boolean }
 
-/** Lista para escolher um valor entre poucos: setas movem, ↵ aplica, ● marca o atual. */
+/** Lista para choose um valor entre poucos: setas movem,  ↵ aplica, ● marca o atual. */
 export function renderPick(g: Grid, title: string, items: PickItem[], index: number, note?: string) {
   const { W, H } = g;
   const w = Math.min(W - 6, 64);
@@ -94,6 +94,37 @@ export function renderPick(g: Grid, title: string, items: PickItem[], index: num
   }
   let ly = y + items.length + 1;
   if (note) { g.put(x + 2, ly, fit(note, w - 4), C.frame, BG.panel); ly++; }
-  g.put(x + 2, ly, '↑↓ escolher   ↵ aplicar   esc cancelar', C.frame, BG.panel);
+  g.put(x + 2, ly, '↑↓ choose    ↵ aplicar   esc cancel', C.frame, BG.panel);
   g.cursor = null;
+}
+
+/** A permission request from an agent: what it wants to run, and the four answers. */
+export function renderApproval(g: Grid, agent: string, tool: string, what: string, opts: { linkable: string | null; prefix: string }) {
+  const { W, H } = g;
+  const w = Math.min(W - 6, 90), inner = w - 4;
+  const body = wrapText(what, inner).slice(0, 6);
+  const extra = [`a  always allow  ${G.h}  ${fit(`${tool}(${opts.prefix}:*)`, inner - 18)}`, ...(opts.linkable ? [`l  allow and link ${fit(opts.linkable, inner - 18)} to ${agent}`] : [])];
+  const h = 2 + 1 + body.length + 1 + extra.length + 2;
+  const x = Math.floor((W - w) / 2), y = Math.max(1, H - 4 - h);
+  const box: Rect = { x, y, w, h };
+  g.panel(box, BG.panel);
+  g.frame(box, `${agent} asks permission`, C.hold, C.hold);
+  g.put(x + 2, y + 1, fit(`${tool}`, inner), C.inkHi, BG.panel);
+  body.forEach((l, i) => g.put(x + 2, y + 2 + i, fit(l, inner), C.ink, BG.panel));
+  extra.forEach((l, i) => g.put(x + 2, y + 3 + body.length + i, fit(l, inner), C.dim, BG.panel));
+  g.put(x + 2, y + h - 2, 'y allow once   n deny   esc later', C.frame, BG.panel);
+  g.cursor = null;
+}
+
+function wrapText(text: string, width: number): string[] {
+  const out: string[] = []; let line = '';
+  for (const word of text.split(/\s+/)) {
+    if (!word) continue;
+    if (!line) line = word;
+    else if ([...line].length + 1 + [...word].length <= width) line += ' ' + word;
+    else { out.push(line); line = word; }
+    while ([...line].length > width) { out.push([...line].slice(0, width).join('')); line = [...line].slice(width).join(''); }
+  }
+  if (line) out.push(line);
+  return out.length ? out : [''];
 }

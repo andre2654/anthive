@@ -54,6 +54,10 @@ Anthive owns the Chrome. It starts a Chrome for Testing (the Playwright one, or 
 
 The agent is told how to use it: snapshot first (the accessibility tree with refs), refs as selectors, screenshots only for layout, never close the browser on its own — and that the page is shared with you.
 
+## Approvals
+
+Agents run in Claude Code's print mode, which cannot ask you anything: a tool that is not pre-allowed is refused with "requires approval". Anthive routes those prompts to itself (`--permission-prompt-tool`): the request pops up on the map as a modal with the agent's name and the exact command, with a bell. `y` allows it once, `a` allows and remembers a rule for that agent (`Bash(python3 scripts/report.py:*)`, kept in the project and added to the allowlist next time the chat starts), `l` allows and links the file the command touches to the agent, `n` denies, `esc` postpones (the agent keeps waiting). Two things never ask: a remembered rule, and a command that touches a file already linked to the agent — linking a file is how you tell an agent it may work on it. A request nobody answers is denied after 15 minutes (`ANTHIVE_APPROVAL_TIMEOUT`, in ms).
+
 ## Deep search
 
 In an agent's chat, `D` opens the input box with the `[deep]` chip on (Tab toggles it). That turn goes out as `Deep search: …` to a process that has the web tools and read-only git in its allowlist, `--forward-subagent-text` so the subagents' progress shows indented in the tree, and effort `max` unless you picked one. The first time the chip goes on for a live chat, the chat restarts once in the same session (nothing is lost). The protocol the agent follows: plan, fan out in parallel (Explore subagents over the repo, `project_search` over the hive, WebSearch then WebFetch on primary sources, the project browser when linked), iterate, synthesize with confidence per finding and inline citations, and record the report with `note_write` as `research: <topic>` — the answer names the note. The web tools stay allowed until the chat closes (`x`); `max` sticks until `e`. There is no spending cap: a deep search runs as many rounds, subagents and pages as the question needs. `ANTHIVE_DEEP_BUDGET_USD=3` caps a deep process at that many dollars if you want one (once hit, the process refuses turns until `x`/`i`).
@@ -64,7 +68,7 @@ In an agent's chat, `D` opens the input box with the `[deep]` chip on (Tab toggl
 
 - **Own renderer.** A character grid with per-cell colors, frame diffing and mouse hit-testing. No curses, no React. The whole UI is ~5k lines of TypeScript on Bun, compiled to one binary.
 - **Agents are `claude -p`.** Each agent is a Claude Code process in `stream-json` mode with a fixed session id, so the transcript in `~/.claude/projects` stays the single source of truth. Anthive reads those transcripts for everything it shows: state, context usage, tasks, diffs, browser activity.
-- **The bus is MCP.** `anthive mcp` is a JSON-RPC server over stdio that Claude Code loads from the project's `.mcp.json`: `note_write`, `note_read`, `notes_list`, `project_map`, `project_search`, `send_message`, `inbox`, `thread_*`, `agents_list`.
+- **The bus is MCP.** `anthive mcp` is a JSON-RPC server over stdio that Claude Code loads from the project's `.mcp.json`: `note_write`, `note_read`, `notes_list`, `project_map`, `project_search`, `send_message`, `inbox`, `thread_*`, `agents_list` — plus `permission_prompt`, which Claude Code itself calls.
 - **The browser is CDP.** `Page.startScreencast` for the picture, `Input.*` for your clicks, `Target.*` to follow the tab the agent is on. PNG frames become Kitty graphics escape sequences; the terminal reports its cell size so the aspect ratio holds and clicks map back to page coordinates.
 
 ## What it writes, and where

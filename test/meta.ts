@@ -25,6 +25,7 @@ const plan = P.firstTurnPlan({ kind: 'agent', id: 'a', name: 'api', cwd: '/tmp',
 must('os dois passos do primeiro turno levam o preâmbulo', plan.every((argv) => argv.includes('--append-system-prompt')));
 must('chat autoriza o servidor anthive', argv.includes('--allowedTools') && argv[argv.indexOf('--allowedTools') + 1] === 'mcp__anthive');
 must('a plain chat has no web tools and no subagent forwarding', !argv.includes('WebSearch') && !argv.includes('WebFetch') && !argv.includes('--forward-subagent-text'));
+must('every chat routes permission prompts to the bus', argv[argv.indexOf('--permission-prompt-tool') + 1] === 'mcp__anthive__permission_prompt' && plan.every((a) => a.includes('--permission-prompt-tool')));
 must('primeiro turno autoriza o servidor anthive', plan.every((a) => a.includes('--allowedTools')));
 // variádico: o que vem depois de mcp__anthive tem que ser uma flag, nunca o prompt
 must('lista variádica termina numa flag, não no prompt', plan.every((a) => (a[a.indexOf('mcp__anthive') + 1] ?? '').startsWith('--')));
