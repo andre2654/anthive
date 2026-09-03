@@ -52,10 +52,12 @@ export function wrap(text: string, width: number): string[] {
   return out.length ? out : [''];
 }
 
+const RESEARCH: Record<string, string> = { WebSearch: 'search', WebFetch: 'fetch', mcp__anthive__project_search: 'hive' };
+
 export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), width = 60, showThinking = false): Row[] {
   const out: Row[] = [];
   let turnId: string | null = null, pending: Child[] = [];
-  const lastTurn = [...evs].reverse().find((e) => e.role === 'user' && !e.tool && e.text)?.uuid ?? null;
+  const lastTurn = [...evs].reverse().find((e) => e.role === 'user' && !e.tool && e.text && !e.sidechain)?.uuid ?? null;
   const flush = () => {
     const live = turnId === lastTurn;
     pending = pending.filter((c, i) => !c.thinking || (live && i === pending.length - 1));
@@ -105,6 +107,11 @@ export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), wid
       pending.push({ glyph: G.tool, gc: C.hold, name: what.split(' ')[0]!, nc: C.hold, detail: m ? `${m[1]} ${t('loaded')} — ${(e.text ?? '').split('#')[1]?.trim().slice(0, 60) ?? ''}` : (e.text ?? '').slice(0, 80), dc: C.dim, right: '', indent, tool: what, out: 0 });
       continue;
     }
+    if (e.sidechain && e.role === 'user' && !e.tool) {
+      // --forward-subagent-text: the brief a subagent received is a child of the turn, never a turn of its own
+      if (e.text) pending.push({ glyph: G.sub, gc: C.link, name: t('brief'), nc: C.link, detail: e.text.slice(0, 200), dc: C.dim, right: '', indent: 1, tool: 'brief', out: 0 });
+      continue;
+    }
     if (e.role === 'user' && !e.tool) {
       if (!e.text) continue;
       flush(); turnId = e.uuid;
@@ -119,7 +126,9 @@ export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), wid
     }
     if (e.tool) {
       const sub = e.tool === 'Agent' || e.tool === 'Task' || e.tool === 'Explore';
-      const { name, detail } = splitTool(e.text ?? e.tool, e.tool, cwd);
+      const split = splitTool(e.text ?? e.tool, e.tool, cwd);
+      const research = RESEARCH[e.tool];   // search/fetch/hive: purple like subagents, short enough for the name column
+      const name = research ?? split.name, detail = split.detail;
       const editable = e.tool === 'Edit' || e.tool === 'MultiEdit' || e.tool === 'Write';
       const bt = browserTool(e.tool);
       if (bt) {
@@ -129,7 +138,7 @@ export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), wid
         pending.push({ glyph: '▣', gc: C.run, name: browserShort(bt), nc: C.ink, detail: what, dc: C.dim, right, indent, tool: e.tool, out: e.usage?.output ?? 0, ev: e.uuid });
         continue;
       }
-      pending.push({ glyph: sub ? G.sub : G.tool, gc: sub ? C.link : editable ? C.run : C.frame, name, nc: sub ? C.link : editable ? C.ink : C.dim, detail: editable ? `${detail}  ${G.h}  ↵ diff` : detail, dc: C.dim, right, indent, tool: name, out: e.usage?.output ?? 0, ev: e.uuid });
+      pending.push({ glyph: sub ? G.sub : G.tool, gc: sub || research ? C.link : editable ? C.run : C.frame, name, nc: sub || research ? C.link : editable ? C.ink : C.dim, detail: editable ? `${detail}  ${G.h}  ↵ diff` : detail, dc: C.dim, right, indent, tool: name, out: e.usage?.output ?? 0, ev: e.uuid });
     } else if (e.text) pending.push({ glyph: ' ', gc: C.frame, name: '', nc: C.dim, detail: e.text, dc: C.ink, right, indent, out: e.usage?.output ?? 0, thinking: e.text === 'pensando', full: e.full });
   }
   flush();
@@ -143,7 +152,7 @@ export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), wid
 }
 
 const hhmm = (ts: number) => (ts ? new Date(ts).toTimeString().slice(0, 8) : '');
-export interface Live { model: string; effort: string; permissionMode: string; busy: boolean; thinking: number; summary: string; cost: number }
+export interface Live { model: string; effort: string; permissionMode: string; busy: boolean; thinking: number; summary: string; cost: number; deep?: boolean }
 export interface LinkChip { glyph: string; label: string; color: RGB }
 export interface PanelData {
   context: number; window: number; model: string; effort: string; perm: string;
@@ -188,9 +197,18 @@ function drawPanel(g: Grid, x: number, top: number, bottom: number, p: PanelData
 /** Altura da caixa de escrita no rodapé: 3 linhas quando aberta, 1 quando fechada. */
 export const INPUT_H = (open: boolean) => (open ? 3 : 1);
 
+/** The chip shown at the left of the text row when the turn is a deep search. */
+export const DEEP_CHIP = '[deep]';
+/** Where the text starts and how wide it is: after the arrow (and the chip), leaving room for the right-aligned hint. */
+export function inputLayout(W: number, deep: boolean): { x: number; w: number; hint: string } {
+  const hint = deep ? t('↵ researches   tab plain   esc leaves') : t('↵ sends   tab deep   esc leaves');
+  const x = deep ? 5 + DEEP_CHIP.length + 1 : 5;
+  return { x, w: Math.max(8, W - 3 - hint.length - 2 - x), hint };
+}
+
 export function renderAgent(
   g: Grid, n: AgentNode, s: Session | null, evs: Ev[], all: Row[], scroll: number, cursorRow: number,
-  status: string, input: { text: string; cursor: number } | null, live: Live | null, chips: LinkChip[],
+  status: string, input: { text: string; cursor: number; deep?: boolean } | null, live: Live | null, chips: LinkChip[],
   panel: PanelData | null = null,
 ) {
   const { W, H } = g;
@@ -210,7 +228,7 @@ export function renderAgent(
     g.put(gx - cl.length, 0, cl, C.dim); g.put(gx, 0, gauge(frac, gw), frac > 0.85 ? C.hold : C.run); g.put(W - 2 - right.length, 0, right, C.dim);
     g.put(6 + n.name.length, 0, fit(`${G.h} ${n.cwd.replace(home, '~')}`, Math.max(0, gx - 8 - cl.length - n.name.length)) + ' ', C.dim);
   } else g.put(6 + n.name.length, 0, fit(`${G.h} ${n.cwd.replace(home, '~')} `, W - 10 - n.name.length), C.dim);
-  const tag = live ? (live.busy ? ` ${G.focus} ${t('chat live')} ` : ` ${G.running} ${t('chat live')} `) : '';
+  const tag = live ? ` ${live.busy ? G.focus : G.running} ${t('chat live')}${live.deep ? ' · deep' : ''} ` : '';
   const meta = [live?.model || s?.model || (s ? '—' : t('new session')), live?.effort || s?.effort || '', live?.permissionMode || '', s?.branch, evs.length ? t('{0} events', evs.length) : '', s ? t('{0} ago', ago(s.ageMs)) : ''].filter(Boolean).join(`  ${G.h}  `);
   g.put(2, 1, fit(meta, W - 4 - tag.length - 1), live ? C.dim : C.frame);
   if (tag) g.put(W - 2 - tag.length, 1, tag, C.run);
@@ -243,22 +261,22 @@ export function renderAgent(
   // a caixa de escrita
   const by = H - 4 - ih + 1;
   if (input) {
+    const deep = !!input.deep, lay = inputLayout(W, deep);
     g.panel({ x: 1, y: by, w: W - 2, h: 3 }, BG.panel);
-    g.frame({ x: 1, y: by, w: W - 2, h: 3 }, t('write to {0}', n.name), C.run, C.link);
+    g.frame({ x: 1, y: by, w: W - 2, h: 3 }, deep ? t('deep search with {0}', n.name) : t('write to {0}', n.name), deep ? C.hold : C.run, deep ? C.hold : C.link);
     g.fill({ x: 2, y: by + 1, w: W - 4, h: 1 }, BG.input);
-    g.put(3, by + 1, `${G.arrow} `, C.run, BG.input);
-    const iw = W - 8;
-    g.put(5, by + 1, pad(input.text, iw), C.inkHi, BG.input);
-    const hint = t('↵ sends   esc leaves');
-    if (!input.text) g.put(5, by + 1, fit(t('what it should do now'), iw - hint.length - 2), C.frame, BG.input);
-    g.put(W - 3 - hint.length, by + 1, hint, C.frame, BG.input);
-    g.cursor = { x: 5 + input.cursor, y: by + 1 };
+    g.put(3, by + 1, `${G.arrow} `, deep ? C.hold : C.run, BG.input);
+    if (deep) g.put(5, by + 1, DEEP_CHIP, C.hold, BG.input);
+    g.put(lay.x, by + 1, pad(input.text, lay.w), C.inkHi, BG.input);
+    if (!input.text) g.put(lay.x, by + 1, fit(deep ? t('a question for the repo, the hive and the web') : t('what it should do now'), lay.w), C.frame, BG.input);
+    g.put(W - 3 - lay.hint.length, by + 1, lay.hint, C.frame, BG.input);
+    g.cursor = { x: lay.x + input.cursor, y: by + 1 };
   } else {
     g.put(2, by, `${G.arrow} `, C.frame);
-    g.put(4, by, fit(`${t('write to {0}', n.name)}  ${G.h}  i`, W - 6), C.frame);
+    g.put(4, by, fit(`${t('write to {0}', n.name)}  ${G.h}  i  ${G.h}  D ${t('deep search')}`, W - 6), C.frame);
   }
   g.put(0, H - 3, G.teeL + G.h.repeat(W - 2) + G.teeR, C.frame);
   keybar(g, H - 2, input
-    ? [['↵', t('send')], ['esc', t('leave the field')]]
-    : [['i', t('write')], ['↑↓', t('navigate')], ['↵', t('turn')], ['t', t('thoughts')], ['y', t('copy')], ['m', t('model')], ['e', t('effort')], ['p', t('permissions')], ['l', t('link')], ...(live ? ([['x', t('stop chat')]] as [string, string][]) : []), ['esc', t('project')]], status);
+    ? [['↵', input.deep ? t('research') : t('send')], ['tab', input.deep ? t('plain turn') : t('deep search')], ['esc', t('leave the field')]]
+    : [['i', t('write')], ['D', t('deep')], ['↑↓', t('navigate')], ['↵', t('turn')], ['t', t('thoughts')], ['y', t('copy')], ['m', t('model')], ['e', t('effort')], ['p', t('permissions')], ['l', t('link')], ...(live ? ([['x', t('stop chat')]] as [string, string][]) : []), ['esc', t('project')]], status);
 }

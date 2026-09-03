@@ -3,12 +3,30 @@ import { App } from '../src/app.ts';
 import { Screen, Key } from '../src/tui/screen.ts';
 import * as P from '../src/core/project.ts';
 import * as store from '../src/core/store.ts';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, chmodSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 let fails = 0;
 const must = (l: string, c: boolean) => { console.log(c ? `✓ ${l}` : `✗ ${l}`); if (!c) fails++; };
+// a fake `claude` on PATH: logs its argv, answers every turn at once (the App spawns whatever `claude` resolves to)
+const fakeBin = mkdtempSync(join(tmpdir(), 'tai-fake-claude-'));
+const fakeLog = join(fakeBin, 'argv.log');
+writeFileSync(join(fakeBin, 'claude'), [
+  '#!/bin/sh',
+  `printf '%s\\n' "$*" >> "${fakeLog}"`,
+  `printf '%s\\n' '{"type":"system","subtype":"init","session_id":"fake-1","model":"fake","permissionMode":"default"}'`,
+  'n=0',
+  'while IFS= read -r line; do',
+  '  n=$((n+1))',
+  `  printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok %s"}]},"uuid":"fake-u-%s","timestamp":"2026-09-02T00:00:00Z"}\\n' "$n" "$n"`,
+  `  printf '%s\\n' '{"type":"result","subtype":"success","result":"see note://research-x","total_cost_usd":0.001,"permission_denials":[]}'`,
+  'done',
+  '',
+].join('\n'));
+chmodSync(join(fakeBin, 'claude'), 0o755);
+process.env.PATH = `${fakeBin}:${process.env.PATH}`;
+const argvLines = () => { try { return readFileSync(fakeLog, 'utf8').trim().split('\n').filter(Boolean); } catch { return [] as string[]; } };
 class F extends Screen {
   constructor() { super({ mouse: true }); this.W = 100; this.H = 28; }
   override measure() {} override enter() {} override restore() {} override write() {} override onKey() {}
@@ -98,6 +116,29 @@ must('faixa de ligações lista a note e a conversa', app.grid.toString().includ
 type(app, 'e');
 must('e abre o seletor de esforço', app.modal?.kind === 'pick' && app.modal.title === 'effort');
 press(app, 'esc');
+
+// --- deep search: i, tab, D, and the restart that must not kill the chat ---
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const waitFor = async (pred: () => boolean, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred()) return true; await sleep(20); } return pred(); };
+type(app, 'i'); await settle();
+must('i opens the box and spawns a plain chat', (await waitFor(() => argvLines().length === 1)) && app.composing && !!app.chat && !argvLines()[0]!.includes('WebSearch'));
+press(app, 'tab');
+must('tab turns the chip on and restarts once with the web tools and xhigh', app.deep && (await waitFor(() => argvLines().length === 2)) && argvLines()[1]!.includes('WebSearch') && argvLines()[1]!.includes('--forward-subagent-text') && argvLines()[1]!.includes('--effort xhigh'));
+await sleep(300);
+must('the old process exiting did not close the chat', !!app.chat && app.composing);
+app.render();
+must('the box shows the chip', app.grid.toString().includes('[deep]'));
+press(app, 'tab'); press(app, 'tab'); await sleep(150);
+must('flipping the chip again does not restart', app.deep && argvLines().length === 2);
+type(app, 'why'); press(app, 'enter');
+must('enter sends the wrapped prompt', app.evs.some((e) => e.role === 'user' && e.text === 'Deep search: why'));
+must('the fake answered and the status names the report note', (await waitFor(() => app.evs.some((e) => e.role === 'assistant' && (e.text ?? '').startsWith('ok')) && app.status.includes('note://research-x'))));
+press(app, 'esc'); type(app, 'i');
+must('i opens a plain box again', app.composing && !app.deep);
+press(app, 'esc'); type(app, 'D');
+must('D opens the box in deep mode', app.composing && app.deep);
+press(app, 'esc'); type(app, 'x');
+must('x stops the chat', !app.chat);
 press(app, 'esc'); await settle();
 must('esc volta ao projeto', app.view === 'project');
 press(app, 'esc'); await settle();

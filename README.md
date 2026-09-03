@@ -35,7 +35,7 @@ For the live browser image you need a terminal that speaks the Kitty graphics pr
 
 1. **Projects.** `n` creates one (a name and a directory). `↵` opens it.
 2. **The map.** Agents on the left, everything else on the right, links drawn between them. `n` adds an agent, a note, a file, a service running on this machine, a browser, or the project's `CLAUDE.md`. `l` links the selected node to another one. `↵` opens it. `]` toggles the side panel.
-3. **An agent** is a named Claude Code session. Open it: a chat with the whole transcript as a tree, markdown, the agent's thinking (`t`), the diffs of every edit (`↵` on an Edit), and a panel with context usage, links and tasks. `m`/`e`/`p` switch model, effort and permission mode mid-session.
+3. **An agent** is a named Claude Code session. Open it: a chat with the whole transcript as a tree, markdown, the agent's thinking (`t`), the diffs of every edit (`↵` on an Edit), and a panel with context usage, links and tasks. `m`/`e`/`p` switch model, effort and permission mode mid-session. `D` (or Tab in the box) turns the turn into a **deep search**: the agent fans out Explore subagents over the repo, searches the hive with `project_search`, hits the web with WebSearch/WebFetch, and saves a sourced report as a `research:` note linked to it.
 
    ![the agent chat: the transcript as a tree, tool calls collapsed, browser actions marked, and the panel with memory, links and tasks](docs/chat.png)
 
@@ -54,11 +54,17 @@ Anthive owns the Chrome. It starts a Chrome for Testing (the Playwright one, or 
 
 The agent is told how to use it: snapshot first (the accessibility tree with refs), refs as selectors, screenshots only for layout, never close the browser on its own — and that the page is shared with you.
 
+## Deep search
+
+In an agent's chat, `D` opens the input box with the `[deep]` chip on (Tab toggles it). That turn goes out as `Deep search: …` to a process that has the web tools and read-only git in its allowlist, `--forward-subagent-text` so the subagents' progress shows indented in the tree, and effort `xhigh` unless you picked one. The first time the chip goes on for a live chat, the chat restarts once in the same session (nothing is lost). The protocol the agent follows: plan, fan out in parallel (Explore subagents over the repo, `project_search` over the hive, WebSearch then WebFetch on primary sources, the project browser when linked), iterate, synthesize with confidence per finding and inline citations, and record the report with `note_write` as `research: <topic>` — the answer names the note. The web tools stay allowed until the chat closes (`x`); `xhigh` sticks until `e`. `ANTHIVE_DEEP_BUDGET_USD=3` caps a deep process at that many dollars (once hit, the process refuses turns until `x`/`i`).
+
+`project_search` is also there for the agents themselves: notes and threads they are allowed to read, and the transcripts of every agent of the project (the newest 32 MB of each), grouped by source, everything written by others framed as data.
+
 ## How it works
 
 - **Own renderer.** A character grid with per-cell colors, frame diffing and mouse hit-testing. No curses, no React. The whole UI is ~5k lines of TypeScript on Bun, compiled to one binary.
 - **Agents are `claude -p`.** Each agent is a Claude Code process in `stream-json` mode with a fixed session id, so the transcript in `~/.claude/projects` stays the single source of truth. Anthive reads those transcripts for everything it shows: state, context usage, tasks, diffs, browser activity.
-- **The bus is MCP.** `anthive mcp` is a JSON-RPC server over stdio that Claude Code loads from the project's `.mcp.json`: `note_write`, `note_read`, `notes_list`, `project_map`, `send_message`, `inbox`, `thread_*`, `agents_list`.
+- **The bus is MCP.** `anthive mcp` is a JSON-RPC server over stdio that Claude Code loads from the project's `.mcp.json`: `note_write`, `note_read`, `notes_list`, `project_map`, `project_search`, `send_message`, `inbox`, `thread_*`, `agents_list`.
 - **The browser is CDP.** `Page.startScreencast` for the picture, `Input.*` for your clicks, `Target.*` to follow the tab the agent is on. PNG frames become Kitty graphics escape sequences; the terminal reports its cell size so the aspect ratio holds and clicks map back to page coordinates.
 
 ## What it writes, and where
@@ -66,7 +72,7 @@ The agent is told how to use it: snapshot first (the accessibility tree with ref
 - `~/.anthive/` — projects, notes, threads, browser profiles. Nothing leaves your machine.
 - `<project>/.mcp.json` — the bus (and the browser) registered as MCP servers, so Claude Code loads them. Anthive tells you when it writes it.
 - `<project>/.git/info/exclude` — `.playwright-mcp/`, where Playwright drops snapshots and screenshots. Your `.gitignore` is not touched.
-- It reads `~/.claude/projects/**` (Claude Code transcripts). Read only.
+- It reads `~/.claude/projects/**` (Claude Code transcripts). Read only. `ANTHIVE_CLAUDE_PROJECTS` points it elsewhere (tests).
 
 ## Status
 

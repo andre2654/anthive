@@ -13,7 +13,7 @@ import { join, basename, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { ROOT, ensure, slugify } from './store.ts';
 import * as store from './store.ts';
-import { Session, Ev, listSessions, sessionById, parseSession } from './sessions.ts';
+import { Session, Ev, listSessions, sessionById, parseSession, PROJECTS } from './sessions.ts';
 import { Task, tasksOfSession } from './tasks.ts';
 import { SYSTEM_PREAMBLE, BROWSER_PREAMBLE } from './chat.ts';
 import { BrowserMode, freePort, isUp, pages, pickPage, findChrome, launchChrome, waitUp, closeChrome as cdpClose } from './cdp.ts';
@@ -166,7 +166,7 @@ export async function contextFiles(cwd: string): Promise<FileItem[]> {
   };
   await add(join(cwd, 'CLAUDE.md'), 'claude', 'CLAUDE.md');
   if (!out.length) await add(join(cwd, '.claude', 'CLAUDE.md'), 'claude', '.claude/CLAUDE.md');
-  await add(join(homedir(), '.claude', 'projects', await claudeSlug(cwd), 'memory', 'MEMORY.md'), 'memory', 'MEMORY.md');
+  await add(join(PROJECTS, await claudeSlug(cwd), 'memory', 'MEMORY.md'), 'memory', 'MEMORY.md');
   return out;
 }
 export const hasClaudeMd = async (cwd: string) => (await contextFiles(cwd)).some((f) => f.context === 'claude');

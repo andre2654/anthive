@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Deep search in the agent chat: `D` / Tab `[deep]` sends a research turn (Explore subagents over the repo, `project_search` over the hive, WebSearch/WebFetch on the web, report saved as a `research:` note); subagent progress streams into the tree.
+- `project_search` bus tool: notes, threads and the transcripts of the project's agents, ACL-aware, grouped by source.
+- Fixed: restarting a chat (model/effort/permissions) no longer closes it when the old process exits.
+
 ## 0.1.0 — 2026-09-02
 
 First public release.

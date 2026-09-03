@@ -2,7 +2,8 @@ import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, basename } from 'node:path';
 
-export const PROJECTS = join(homedir(), '.claude', 'projects');
+/** Where Claude Code keeps transcripts; ANTHIVE_CLAUDE_PROJECTS overrides it (hermetic tests). */
+export const PROJECTS = process.env.ANTHIVE_CLAUDE_PROJECTS ?? join(homedir(), '.claude', 'projects');
 
 export type State = 'running' | 'waiting' | 'idle' | 'stuck' | 'sleeping';
 
@@ -112,7 +113,7 @@ export function describe(o: any): { text: string; tool: string | null; full?: st
       const b = c[i];
       if (b?.type === 'tool_use') {
         const inp = b.input ?? {};
-        const hint = inp.file_path ?? inp.path ?? inp.pattern ?? inp.command ?? inp.description ?? '';
+        const hint = inp.file_path ?? inp.path ?? inp.pattern ?? inp.command ?? inp.description ?? inp.query ?? inp.url ?? '';
         // entrada guardada só quando é pequena o bastante para ser útil na tela (tarefas, edições)
         const cap = b.name === 'Edit' || b.name === 'MultiEdit' || b.name === 'Write' ? 64_000 : 12_000;
         const keep = JSON.stringify(inp).length <= cap ? inp : undefined;
@@ -175,7 +176,7 @@ export async function summarize(path: string): Promise<Session | null> {
       if (b?.type !== 'tool_use' || results.has(b.id)) continue;
       pendingTool = b.name;
       const inp = b.input ?? {};
-      pendingInput = String(inp.command ?? inp.file_path ?? inp.path ?? inp.pattern ?? inp.url ?? inp.description ?? '')
+      pendingInput = String(inp.command ?? inp.file_path ?? inp.path ?? inp.pattern ?? inp.url ?? inp.query ?? inp.description ?? '')
         .replace(/\s+/g, ' ').trim();
       break;
     }

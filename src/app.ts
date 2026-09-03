@@ -12,14 +12,14 @@ import { supportsKittyGraphics, placeImage, clearImages } from './tui/image.ts';
 import { LiveView } from './core/live.ts';
 import { BrowserMode, fitImage, toPage, inBox } from './core/cdp.ts';
 import { modeLabel } from './views/item.ts';
-import { renderAgent, rows, Row, INPUT_H, LinkChip, detailWidth, tasksFrom, PanelData, panelFits } from './views/agent.ts';
+import { renderAgent, rows, Row, INPUT_H, LinkChip, detailWidth, tasksFrom, PanelData, panelFits, inputLayout } from './views/agent.ts';
 import * as P from './core/project.ts';
 import * as store from './core/store.ts';
 import { ROOT } from './core/store.ts';
 import * as bus from './core/bus.ts';
 import * as svc from './core/services.ts';
 import { Session, Ev, parseSession, windowOf } from './core/sessions.ts';
-import { ChatSession, ChatEvent, MODELS, EFFORTS, PERMISSIONS } from './core/chat.ts';
+import { ChatSession, ChatEvent, MODELS, EFFORTS, PERMISSIONS, DEEP_EFFORT, deepPrompt } from './core/chat.ts';
 import { readFile, writeFile, unlink, mkdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { t } from './i18n.ts';
@@ -50,6 +50,7 @@ export class App {
   agent: P.AgentNode | null = null; evs: Ev[] = []; rowsAll: Row[] = []; aScroll = 0; aCursor = -1; expanded = new Set<string>();
   chat: ChatSession | null = null; composing = false; chatInput = new TextInput(); prefs = { model: '', effort: '', permissionMode: '' };
   showThinking = false; showPanel = true;
+  deep = false;   // the [deep] chip of the input box: the next turn is a deep search
   // itens
   note: store.Doc | null = null; noteScroll = 0;
   file: P.FileItem | null = null; fileLines: string[] | null = null; fileScroll = 0;
@@ -396,7 +397,7 @@ export class App {
     }
     return out;
   }
-  private get live() { const c = this.chat; return c ? { model: c.model, effort: c.effort, permissionMode: c.permissionMode, busy: c.busy, thinking: c.thinking, summary: c.summary, cost: c.cost } : null; }
+  private get live() { const c = this.chat; return c ? { model: c.model, effort: c.effort, permissionMode: c.permissionMode, deep: c.deep, busy: c.busy, thinking: c.thinking, summary: c.summary, cost: c.cost } : null; }
 
   /** O painel direito: o que vale saber do agente sem sair da conversa. */
   private panelData(): PanelData | null {
@@ -418,7 +419,7 @@ export class App {
     const r = this.rowsAll[this.aCursor] ?? this.rowsAll[this.rowsAll.length - 2];
     const turn = r?.turn; if (!turn) { this.say(t('nothing to copy here')); return; }
     const i = this.evs.findIndex((e) => e.uuid === turn);
-    const chunk = this.evs.slice(i).filter((e, k) => k === 0 || (e.role === 'assistant' && !e.tool && e.full && this.evs.slice(i + 1, i + k).every((x) => !(x.role === 'user' && !x.tool && !x.meta))));
+    const chunk = this.evs.slice(i).filter((e, k) => k === 0 || (e.role === 'assistant' && !e.tool && e.full && this.evs.slice(i + 1, i + k).every((x) => !(x.role === 'user' && !x.tool && !x.meta && !x.sidechain))));
     const text = chunk.map((e) => (e.role === 'user' ? `> ${e.full ?? e.text}` : e.full ?? e.text)).join('\n\n');
     try {
       const p = Bun.spawn(['pbcopy'], { stdin: 'pipe' }); p.stdin.write(text); p.stdin.end();
@@ -444,14 +445,20 @@ export class App {
     // o barramento tem que existir no diretório ANTES do processo subir: é lido na partida
     try { const bus = await P.ensureBus(a.cwd); if (bus !== 'unchanged') this.say(t('bus {0} in .mcp.json — note_write, project_map and the rest work here now', bus === 'new' ? t('new') : t('updated')), 6000); }
     catch (e) { this.say(t('could not write .mcp.json: {0}', (e as Error).message), 6000); }
-    this.chat = new ChatSession({ cwd: a.cwd, resume: a.session ? sid : undefined, sessionId: a.session ? undefined : sid, agent: a.item?.name, browser,
-      model: this.prefs.model || undefined, effort: this.prefs.effort || undefined, permissionMode: this.prefs.permissionMode || undefined }, (e) => this.onChat(e));
+    this.chat = new ChatSession({ cwd: a.cwd, resume: a.session ? sid : undefined, sessionId: a.session ? undefined : sid, agent: a.item?.name, browser, deep: this.deep,
+      model: this.prefs.model || undefined, effort: this.prefs.effort || (this.deep ? DEEP_EFFORT : undefined), permissionMode: this.prefs.permissionMode || undefined }, (e) => this.onChat(e));
     this.chat.start();
   }
   stopChat() { this.chat?.stop(); this.chat = null; this.composing = false; this.dirty = true; }
   private onChat(e: ChatEvent) {
     if (e.kind === 'ev') { this.evs.push(e.ev); this.rebuild(true); }
-    else if (e.kind === 'result') { this.screen.write('\x07'); const den = e.denials.length ? ` · ${t('denied {0} — p changes permissions', e.denials.join(', '))}` : ''; this.say(`${e.stop || 'ok'}${e.cost ? ` · $${e.cost.toFixed(3)}` : ''}${den}`, den ? 8000 : 3000); }
+    else if (e.kind === 'result') {
+      this.screen.write('\x07');
+      const web = e.denials.some((d) => d === 'WebSearch' || d === 'WebFetch');
+      const den = e.denials.length ? ` · ${web ? t('denied {0} — D or tab (deep search) allows the web', e.denials.join(', ')) : t('denied {0} — p changes permissions', e.denials.join(', '))}` : '';
+      const note = this.chat?.deep ? /note:\/\/([\w-]+)/.exec(e.text)?.[1] : null;
+      this.say(`${e.stop || 'ok'}${e.cost ? ` · $${e.cost.toFixed(3)}` : ''}${note ? ` · ${t('report in note://{0}', note)}` : ''}${den}`, den || note ? 8000 : 3000);
+    }
     else if (e.kind === 'stderr') this.say(e.text.split('\n')[0] ?? 'erro', 6000);
     else if (e.kind === 'exit') { if (this.chat && !this.chat.proc) return; this.say(t('chat exited ({0})', e.code), 5000); this.chat = null; this.composing = false; }
     this.dirty = true;
@@ -460,10 +467,23 @@ export class App {
     const text = this.chatInput.value.trim(); if (!text) return;
     if (!this.chat) { this.say(t('opening the chat… send again in a moment')); void this.op(this.startChat()); return; }
     if (this.chat.busy) { this.say(t('wait for the answer to finish')); return; }
-    if (!this.chat.send(text)) { this.say('chat caiu — i reabre'); this.chat = null; return; }
-    this.evs.push({ uuid: crypto.randomUUID(), parent: null, sidechain: false, type: 'user', ts: Date.now(), role: 'user', text });
+    // the chip was turned on while the answer was running: the process gets the web tools now, before this turn
+    if (this.deep && !this.chat.deep) this.chat.restart({ deep: true, effort: this.prefs.effort || DEEP_EFFORT });
+    const sent = this.deep ? deepPrompt(text) : text;
+    if (!this.chat.send(sent)) { this.say(t('chat went down — i reopens')); this.chat = null; return; }
+    this.evs.push({ uuid: crypto.randomUUID(), parent: null, sidechain: false, type: 'user', ts: Date.now(), role: 'user', text: sent, full: sent });
     this.rebuild(true); this.chatInput.set('');
   }
+  /** The [deep] chip. Turning it on for a live chat that cannot search yet restarts it once (same session) with the web tools. */
+  setDeep(on: boolean) {
+    this.deep = on; this.dirty = true;
+    if (!on) { this.say(t('plain turn — the web tools stay allowed until the chat closes (x)')); return; }
+    const c = this.chat;
+    if (c && !c.deep && !c.busy) { c.restart({ deep: true, effort: this.prefs.effort || DEEP_EFFORT }); this.say(t('deep search on: web tools, subagent progress, effort {0} — same session, nothing lost', c.effort), 6000); }
+    else if (c && !c.deep) this.say(t('deep search armed — the chat restarts with the web tools when this answer finishes'), 5000);
+    else this.say(t('deep search: the next turn researches the repo, the hive and the web'));
+  }
+
   pickSetting(kind: 'model' | 'effort' | 'permissionMode') {
     const label = { model: t('model'), effort: t('effort'), permissionMode: t('permissions') }[kind];
     const base = { model: MODELS, effort: EFFORTS, permissionMode: PERMISSIONS }[kind];
@@ -622,6 +642,7 @@ export class App {
         if (this.composing) {
           if (k.k === 'esc') { this.composing = false; this.dirty = true; return; }
           if (k.k === 'enter') { this.sendChat(); return; }
+      if (k.k === 'tab') { this.setDeep(!this.deep); return; }
           if (k.k !== 'up' && k.k !== 'down' && k.k !== 'wheel') { this.chatInput.handle(k); this.dirty = true; return; }
         }
         const view = this.memView(), max = Math.max(0, this.rowsAll.length - view);
@@ -634,7 +655,8 @@ export class App {
         }
         else if (k.k === 'esc') { this.view = 'project'; void this.op(this.load()); }
         else if (k.k === 'char') {
-          if (k.c === 'i') { this.composing = true; if (!this.chat) void this.op(this.startChat()); }
+          if (k.c === 'i') { this.deep = false; this.composing = true; if (!this.chat) void this.op(this.startChat()); }
+      else if (k.c === 'D') { this.composing = true; this.setDeep(true); if (!this.chat) void this.op(this.startChat()); }
           else if (k.c === 'm') this.pickSetting('model'); else if (k.c === 'e') this.pickSetting('effort'); else if (k.c === 'p') this.pickSetting('permissionMode');
           else if (k.c === 'l' && this.agent) this.pickLinkTarget(this.agent.id);
           else if (k.c === 'x') { this.stopChat(); this.say(t('chat stopped — the transcript stays')); }
@@ -683,8 +705,9 @@ export class App {
       renderBrowser(g, this.browser, { live: live ? { frame: fr, url: live.url, title: live.title, error: live.error, connected: live.connected } : null, box: this.imgBox, typing: this.typing, canImg, booting: this.booting }, this.status, this.linksOf(this.browser.id));
     }
     else if (this.view === 'agent' && this.agent) {
-      const w = this.composing ? this.chatInput.window(this.grid.W - 30) : null;
-      renderAgent(g, this.agent, this.agent.session, this.evs, this.rowsAll, this.aScroll, this.aCursor, this.status, w ? { text: w.text, cursor: w.cursorAt } : null, this.live, this.chips(), this.panelData());
+      const lay = inputLayout(this.grid.W, this.deep);
+    const w = this.composing ? this.chatInput.window(lay.w) : null;
+      renderAgent(g, this.agent, this.agent.session, this.evs, this.rowsAll, this.aScroll, this.aCursor, this.status, w ? { text: w.text, cursor: w.cursorAt, deep: this.deep } : null, this.live, this.chips(), this.panelData());
     }
     else if (this.view === 'note' && this.note) renderNote(g, this.note, this.noteScroll, this.status, this.linksOf(`note-${this.note.id}`));
     else if (this.view === 'file' && this.file) renderFile(g, this.file, this.fileLines, this.fileScroll, this.status, this.linksOf(this.file.id));

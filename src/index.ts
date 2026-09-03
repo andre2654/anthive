@@ -46,7 +46,8 @@ if (cmd === '--help' || cmd === '-h' || cmd === 'help') {
   anthive install-mcp   register the agent bus in the current directory's .mcp.json
   anthive mcp           run the MCP server (agents call this; you don't)
 
-  env: ANTHIVE_HOME (data dir, default ~/.anthive)`);
+  env: ANTHIVE_HOME (data dir, default ~/.anthive)  ANTHIVE_DEEP_BUDGET_USD (cap a deep search process)
+       ANTHIVE_CLAUDE_PROJECTS (where Claude Code keeps transcripts, default ~/.claude/projects)`);
   process.exit(0);
 }
 
