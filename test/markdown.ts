@@ -31,5 +31,12 @@ const code = ls.find((l) => l.kind === 'code')!;
 must('código não quebra: corta com …', [...plain(code)].length <= 40 && plain(code).endsWith('…'));
 must('régua vira traço', ls.some((l) => l.kind === 'hr'));
 must('sem linha em branco duplicada', !ls.some((l, i) => l.kind === 'blank' && ls[i + 1]?.kind === 'blank'));
+// --- tables
+const tb = renderMd('| a | b |\n|---|---|\n| 1 | **x** |\n| um valor bem comprido nesta célula | y |', 30);
+must('a table becomes aligned table lines: header, rule, rows', tb.filter((l) => l.kind === 'table').length >= 4 && plain(tb[0]!).startsWith('a') && plain(tb[0]!).includes('b') && /^─+\s+─+/.test(plain(tb[1]!)));
+must('cells wrap inside their column when the table is wider than the screen', tb.filter((l) => l.kind === 'table').length > 4 && tb.every((l) => [...plain(l)].length <= 30));
+must('bold inside a cell is emphasized', tb.some((l) => l.spans.some((sp) => sp.text === 'x' && sp.color === C.inkHi)));
+must('a lone pipe line is not a table', renderMd('| just text', 30)[0]!.kind === 'p');
+
 console.log(fails ? `\n${fails} falha(s)` : '\ntudo verde');
 process.exit(fails ? 1 : 0);

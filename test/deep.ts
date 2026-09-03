@@ -86,5 +86,14 @@ must('notes and posts are found, ACL respected', dh.some((h) => h.kind === 'note
 const txt = formatHits({ hits: dh, counts: { notes: 1, threads: 2, transcripts: 0 }, scanned: 0, bytes: 0 }, 'api', 'idem', (a, t) => `<wrapped ${a}>${t}</wrapped>`);
 must('others are wrapped, own posts are [you]', txt.includes('<wrapped') && txt.includes('[you') && txt.startsWith('3 matches for "idem"'));
 must('no match says so without an error', formatHits({ hits: [], counts: { notes: 0, threads: 0, transcripts: 0 }, scanned: 2, bytes: 0 }, 'api', 'zzz', (a, t) => t).startsWith('No match for "zzz"'));
+// --- the three voices on screen
+const vevs = [ev({ type: 'user', role: 'user', text: 'oi', full: 'oi', ts: 1 }), ev({ text: 'resposta', full: 'resposta' })];
+const vrows = rows(vevs, '', new Set(), 60, false, 'api');
+const g3 = new Grid(100, 20);
+renderAgent(g3, agent, null, vevs, vrows, 0, -1, '', null, null, []);
+const yRow = vrows.findIndex((r) => r.voice === 'you'), aRow = vrows.findIndex((r) => r.voice === 'agent');
+must('your line sits on a band', !!g3.cell(20, 3 + yRow).bg);
+must('the agent line has the bar and the name', g3.toString().split('\n')[3 + aRow]!.includes('▎resposta') && g3.toString().split('\n')[3 + aRow]!.includes('api'));
+
 console.log(fails ? `\n${fails} failure(s)` : '\nall green');
 process.exit(fails ? 1 : 0);

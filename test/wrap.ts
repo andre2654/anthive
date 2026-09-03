@@ -16,5 +16,11 @@ must('continuação mantém o tronco da árvore', rs.filter((r) => r.kind === 'c
 must('"agora" diz o estado, não repete a resposta', rs[rs.length - 1]!.kind === 'now' && rs[rs.length - 1]!.detail === 'waiting for you');
 const tool = rows([ev({ type: 'user', role: 'user', text: 'x', full: 'x' }), ev({ text: 'Bash ' + 'c'.repeat(200), tool: 'Bash' })], '', new Set(), 40);
 must('comando de ferramenta fica numa linha só', !tool.some((r) => r.kind === 'cont'));
+// --- voices: you, the agent, its thoughts
+const voiced = rows([ev({ type: 'user', role: 'user', text: 'oi', full: 'oi' }), ev({ thinking: 'hmm', text: 'pensando' }), ev({ text: 'resposta', full: 'resposta **forte**' })], '', new Set(), 40, true, 'api');
+must('your turn is voice you, in green', voiced[0]!.voice === 'you' && voiced[0]!.name === 'you');
+must('the answer carries the agent name and voice agent', voiced.some((r) => r.voice === 'agent' && r.name === 'api'));
+must('thinking is voice thought', voiced.some((r) => r.voice === 'thought'));
+
 console.log(fails ? `\n${fails} falha(s)` : '\ntudo verde');
 process.exit(fails ? 1 : 0);

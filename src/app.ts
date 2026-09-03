@@ -375,7 +375,7 @@ export class App {
   lastLoadedPath = '';
   private memView() { return Math.max(1, this.grid.H - 8 - INPUT_H(this.composing)); }
   private rebuild(toBottom: boolean) {
-    this.rowsAll = rows(this.evs, this.agent?.cwd ?? '', this.expanded, detailWidth(this.grid.W, this.showPanel), this.showThinking);
+    this.rowsAll = rows(this.evs, this.agent?.cwd ?? '', this.expanded, detailWidth(this.grid.W, this.showPanel), this.showThinking, this.agent?.name ?? '');
     const max = Math.max(0, this.rowsAll.length - this.memView());
     if (toBottom) { this.aScroll = max; this.aCursor = -1; } else this.aScroll = Math.min(this.aScroll, max);
     this.dirty = true;

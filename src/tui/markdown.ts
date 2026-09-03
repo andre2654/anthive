@@ -6,7 +6,7 @@
 import { C, RGB } from './theme.ts';
 
 export interface Span { text: string; color: RGB }
-export type MdKind = 'h' | 'p' | 'li' | 'code' | 'quote' | 'blank' | 'hr';
+export type MdKind = 'h' | 'p' | 'li' | 'code' | 'quote' | 'blank' | 'hr' | 'table';
 export interface MdLine { kind: MdKind; spans: Span[] }
 
 type Ch = { ch: string; color: RGB };
@@ -69,12 +69,63 @@ function wrapChs(content: Ch[], width: number, first: Ch[], hang: Ch[]): Ch[][] 
   return lines;
 }
 
+// ---------------------------------------------------------------- tabelas
+const isSep = (l: string) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l) && l.includes('-');
+const cells = (l: string) => {
+  let s = l.trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|') && !s.endsWith('\\|')) s = s.slice(0, -1);
+  return s.split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, '|').trim());
+};
+const bare = (s: string) => s.replace(/\*\*/g, '').replace(/`/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+
+/** Colunas alinhadas, cabeçalho claro, sublinhado, células quebradas na largura da coluna; colunas largas encolhem até caber. */
+function table(header: string[], body: string[][], w: number): MdLine[] {
+  const ncol = Math.max(header.length, ...body.map((r) => r.length));
+  const all = [header, ...body].map((r) => Array.from({ length: ncol }, (_, i) => r[i] ?? ''));
+  const widths = Array.from({ length: ncol }, (_, i) => Math.max(1, ...all.map((r) => [...bare(r[i]!)].length)));
+  const gap = 2, avail = Math.max(ncol * 4, w - gap * (ncol - 1));
+  let total = widths.reduce((a, b) => a + b, 0);
+  while (total > avail) { const i = widths.indexOf(Math.max(...widths)); if (widths[i]! <= 4) break; widths[i]!--; total--; }
+  const out: MdLine[] = [];
+  const emit = (row: string[], color: RGB) => {
+    const wrapped = row.map((cell, i) => (cell ? wrapChs(inline(cell, color), widths[i]!, [], []) : [[]]));
+    const h = Math.max(1, ...wrapped.map((c) => c.length));
+    for (let k = 0; k < h; k++) {
+      const chs: Ch[] = [];
+      for (let i = 0; i < ncol; i++) {
+        const line = wrapped[i]![k] ?? [];
+        chs.push(...line);
+        for (let p = line.length; p < widths[i]!; p++) chs.push({ ch: ' ', color: C.ink });
+        if (i < ncol - 1) chs.push({ ch: ' ', color: C.frame }, { ch: ' ', color: C.frame });
+      }
+      out.push({ kind: 'table', spans: toSpans(chs) });
+    }
+  };
+  emit(all[0]!, C.inkHi);
+  const rule: Ch[] = [];
+  widths.forEach((cw, i) => { for (let p = 0; p < cw; p++) rule.push({ ch: '─', color: C.frame }); if (i < ncol - 1) rule.push({ ch: ' ', color: C.frame }, { ch: ' ', color: C.frame }); });
+  out.push({ kind: 'table', spans: toSpans(rule) });
+  for (const r of all.slice(1)) emit(r, C.ink);
+  return out;
+}
+
 export function renderMd(text: string, width: number): MdLine[] {
   const out: MdLine[] = [];
   let inCode = false;
   const w = Math.max(8, width);
-  for (const raw of text.replace(/\r/g, '').split('\n')) {
+  const lines = text.replace(/\r/g, '').split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i]!;
     if (/^\s*```/.test(raw)) { inCode = !inCode; continue; }
+    if (!inCode && raw.trim().startsWith('|') && i + 1 < lines.length && isSep(lines[i + 1]!)) {
+      const body: string[][] = [];
+      let j = i + 2;
+      while (j < lines.length && lines[j]!.trim().startsWith('|')) { body.push(cells(lines[j]!)); j++; }
+      out.push(...table(cells(raw), body, w));
+      i = j - 1;
+      continue;
+    }
     if (inCode) {
       const chs = [...('  ' + raw)].map((ch) => ({ ch, color: C.dim }));
       out.push({ kind: 'code', spans: toSpans(chs.length > w ? [...chs.slice(0, w - 1), { ch: '…', color: C.frame }] : chs) });

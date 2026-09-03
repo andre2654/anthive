@@ -10,7 +10,7 @@ import { App } from '../src/app.ts';
 import { Screen } from '../src/tui/screen.ts';
 import { Grid } from '../src/tui/grid.ts';
 import * as P from '../src/core/project.ts';
-import { Cdp, pickPage, isUp } from '../src/core/cdp.ts';
+import { Cdp, pickPage, isUp, closeChrome } from '../src/core/cdp.ts';
 import { writeFile } from 'node:fs/promises';
 
 process.env.TERM_PROGRAM = 'ghostty';   // the app draws the image box only where the Kitty protocol exists
@@ -20,6 +20,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const p = (await P.listProjects()).find((x) => x.name === project);
 if (!p) { console.error(`no project ${project} in ${process.env.ANTHIVE_HOME}`); process.exit(1); }
+// the project's hidden Chrome rasterizes the pages (and shows up live in the browser shot): make sure it is up, remember whether we started it
+const graph = await P.loadGraph(p.id);
+const brItem = graph.items.find((i): i is P.BrowserItem => i.kind === 'browser');
+const startedChrome = brItem ? (await P.ensureBrowserUp(brItem)) === 'started' : false;
 const screen = new Screen(); screen.W = W; screen.H = H; screen.write = () => {};
 const app = new App(screen); app.consentOk = true;
 await app.openProject(p);
@@ -104,4 +108,5 @@ for (const s of shots) {
 }
 await c.send('Target.closeTarget', { targetId: tid });
 c.close();
+if (startedChrome && brItem) await closeChrome(brItem.port);
 process.exit(0);

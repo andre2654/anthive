@@ -13,7 +13,8 @@ import { renderMd, Span } from '../tui/markdown.ts';
 import { t } from '../i18n.ts';
 
 export type RowKind = 'turn' | 'child' | 'cont' | 'summary' | 'compact' | 'now' | 'blank';
-export interface Row { kind: RowKind; turn: string | null; connector: string; glyph: string; gc: RGB; name: string; nc: RGB; detail: string; dc: RGB; right: string; ts: number; showTime: boolean; spans?: Span[]; ev?: string }
+export type Voice = 'you' | 'agent' | 'thought';
+export interface Row { kind: RowKind; turn: string | null; connector: string; glyph: string; gc: RGB; name: string; nc: RGB; detail: string; dc: RGB; right: string; ts: number; showTime: boolean; voice?: Voice; spans?: Span[]; ev?: string }
 const BLANK: Row = { kind: 'blank', turn: null, connector: '', glyph: '', gc: C.frame, name: '', nc: C.frame, detail: '', dc: C.frame, right: '', ts: 0, showTime: false };
 const COLLAPSE_OVER = 6;
 
@@ -54,7 +55,7 @@ export function wrap(text: string, width: number): string[] {
 
 const RESEARCH: Record<string, string> = { WebSearch: 'search', WebFetch: 'fetch', mcp__anthive__project_search: 'hive' };
 
-export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), width = 60, showThinking = false): Row[] {
+export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), width = 60, showThinking = false, agentName = ''): Row[] {
   const out: Row[] = [];
   let turnId: string | null = null, pending: Child[] = [];
   const lastTurn = [...evs].reverse().find((e) => e.role === 'user' && !e.tool && e.text && !e.sidechain)?.uuid ?? null;
@@ -79,19 +80,19 @@ export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), wid
         if (c.thought) {
           // raciocínio: texto corrido, apagado, quebrado na largura
           const ls = wrap(c.thought, width);
-          out.push({ kind: 'child', turn: turnId, connector: conn, glyph: c.glyph, gc: c.gc, name: c.name, nc: c.nc, detail: ls[0]!, dc: C.frame, right: '', ts: 0, showTime: false });
-          for (const l of ls.slice(1)) out.push({ kind: 'cont', turn: turnId, connector: stem, glyph: '', gc: C.frame, name: '', nc: C.frame, detail: l, dc: C.frame, right: '', ts: 0, showTime: false });
+          out.push({ kind: 'child', turn: turnId, connector: conn, glyph: c.glyph, gc: c.gc, name: c.name, nc: c.nc, detail: ls[0]!, dc: C.frame, right: '', ts: 0, showTime: false, voice: 'thought' });
+          for (const l of ls.slice(1)) out.push({ kind: 'cont', turn: turnId, connector: stem, glyph: '', gc: C.frame, name: '', nc: C.frame, detail: l, dc: C.frame, right: '', ts: 0, showTime: false, voice: 'thought' });
           continue;
         }
         if (c.tool || c.thinking) {
-          out.push({ kind: 'child', turn: turnId, connector: conn, glyph: c.glyph, gc: c.gc, name: c.name, nc: c.nc, detail: c.detail, dc: c.dc, right: c.right, ts: 0, showTime: false, ev: c.ev });
+          out.push({ kind: 'child', turn: turnId, connector: conn, glyph: c.glyph, gc: c.gc, name: c.name, nc: c.nc, detail: c.detail, dc: c.dc, right: c.right, ts: 0, showTime: false, ev: c.ev, voice: c.thinking ? 'thought' : undefined });
           continue;
         }
         // resposta em markdown: títulos, listas, código e ênfase viram cor
         const md = renderMd(c.full ?? c.detail, width);
         const first = md[0];
-        out.push({ kind: 'child', turn: turnId, connector: conn, glyph: c.glyph, gc: c.gc, name: c.name, nc: c.nc, detail: first ? first.spans.map((x) => x.text).join('') : '', dc: c.dc, right: c.right, ts: 0, showTime: false, spans: first?.spans });
-        for (const l of md.slice(1)) out.push({ kind: 'cont', turn: turnId, connector: stem, glyph: '', gc: C.frame, name: '', nc: C.frame, detail: l.spans.map((x) => x.text).join(''), dc: c.dc, right: '', ts: 0, showTime: false, spans: l.spans });
+        out.push({ kind: 'child', turn: turnId, connector: conn, glyph: c.glyph, gc: c.gc, name: agentName || c.name, nc: agentName ? C.link : c.nc, detail: first ? first.spans.map((x) => x.text).join('') : '', dc: c.dc, right: c.right, ts: 0, showTime: false, voice: 'agent', spans: first?.spans });
+        for (const l of md.slice(1)) out.push({ kind: 'cont', turn: turnId, connector: stem, glyph: '', gc: C.frame, name: '', nc: C.frame, detail: l.spans.map((x) => x.text).join(''), dc: c.dc, right: '', ts: 0, showTime: false, voice: 'agent', spans: l.spans });
       }
     }
     out.push(BLANK); pending = [];
@@ -116,8 +117,8 @@ export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), wid
       if (!e.text) continue;
       flush(); turnId = e.uuid;
       const ls = wrap(e.full ?? e.text, width);
-      out.push({ kind: 'turn', turn: e.uuid, connector: '', glyph: G.running, gc: C.run, name: t('you'), nc: C.inkHi, detail: ls[0]!, dc: C.ink, right: '', ts: e.ts, showTime: true });
-      for (const l of ls.slice(1)) out.push({ kind: 'cont', turn: e.uuid, connector: '', glyph: '', gc: C.frame, name: '', nc: C.frame, detail: l, dc: C.ink, right: '', ts: 0, showTime: false });
+      out.push({ kind: 'turn', turn: e.uuid, connector: '', glyph: G.running, gc: C.run, name: t('you'), nc: C.run, detail: ls[0]!, dc: C.inkHi, right: '', ts: e.ts, showTime: true, voice: 'you' });
+      for (const l of ls.slice(1)) out.push({ kind: 'cont', turn: e.uuid, connector: '', glyph: '', gc: C.frame, name: '', nc: C.frame, detail: l, dc: C.inkHi, right: '', ts: 0, showTime: false, voice: 'you' });
       continue;
     }
     const right = e.usage?.output ? tok(e.usage.output) : '';
@@ -246,12 +247,17 @@ export function renderAgent(
   for (let i = 0; i < slice.length; i++) {
     const r = slice[i]!, y = top + i; if (r.kind === 'blank') continue;
     const on = scroll + i === cursorRow; if (on) g.fill({ x: 1, y, w: W - 2, h: 1 }, BG.sel);
+    // três vozes: você numa faixa própria, o agente com o nome e uma barra ao lado, o pensamento apagado com barra pontilhada
+    const band = !on && r.voice === 'you' ? BG.input : undefined;
+    if (band) g.fill({ x: nameX - 1, y, w: detailX + detailW - nameX + 1, h: 1 }, band);
+    if (r.voice === 'agent') g.put(detailX - 1, y, '▎', C.link);
+    if (r.voice === 'thought') g.put(detailX - 1, y, G.dV, C.sparkH);
     g.put(2, y, pad(r.connector, connW), C.frame); g.put(2 + connW, y, r.glyph, r.gc);
-    if (r.name) g.put(nameX, y, pad(r.name, nameW - 1), on && r.kind !== 'turn' ? C.inkHi : r.nc);
+    if (r.name) g.put(nameX, y, pad(r.name, nameW - 1), on && r.kind !== 'turn' ? C.inkHi : r.nc, band);
     let detail = r.detail, dc = r.dc;
     if (r.kind === 'now' && live?.busy) { detail = live.thinking ? `${t('thinking')}${G.ell} ${tok(live.thinking)}` : live.summary || `${t('thinking')}${G.ell}`; dc = C.run; }
-    if (r.spans && !on) { let sx = detailX; for (const sp of r.spans) { g.put(sx, y, fit(sp.text, Math.max(0, detailX + detailW - sx)), sp.color); sx += [...sp.text].length; if (sx >= detailX + detailW) break; } }
-    else g.put(detailX, y, fit(detail, detailW), on ? C.inkHi : dc);
+    if (r.spans && !on) { let sx = detailX; for (const sp of r.spans) { g.put(sx, y, fit(sp.text, Math.max(0, detailX + detailW - sx)), sp.color, band); sx += [...sp.text].length; if (sx >= detailX + detailW) break; } }
+    else g.put(detailX, y, fit(detail, detailW), on ? C.inkHi : dc, band);
     if (r.right) g.put(rightEdge - 3 - timeW - tokW, y, padStart(r.right, tokW), C.frame);
     if (r.showTime) g.put(rightEdge - 2 - timeW, y, hhmm(r.ts), C.frame);
   }
