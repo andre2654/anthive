@@ -209,10 +209,46 @@ must('esc gives the mouse back to the app', !app.selecting);
 app.render();
 must('and the screen paints again', app.grid.toString().includes(mark));
 
+// --- selection mode scrolls: the frame is frozen, not stuck ---
+for (let i = 0; i < 200; i++) app.evs.push({ uuid: `fill-${i}`, parent: null, sidechain: false, type: 'assistant', ts: Date.now(), role: 'assistant', text: `linha ${i}`, full: `linha ${i}` } as any);
+(app as any).rebuild(true);
+type(app, 's');
+must('selection mode is on', app.selecting);
+type(app, 'g');
+must('g goes to the top', app.selScroll === 0);
+type(app, 'G');
+const bottom = app.selScroll;
+must('G goes to the bottom', bottom > 0);
+press(app, 'up');
+must('the arrows scroll', app.selScroll === bottom - 1);
+app.key({ k: 'wheel', dir: -1, x: 0, y: 5 } as any);
+must('the wheel scrolls too', app.selScroll === bottom - 4);
+type(app, 's');
+must('s comes back', !app.selecting);
+
+// --- the mouse points, y copies what it points at, and it lights up ---
+const rowOf = (evId: string) => app.rowsAll.findIndex((r) => r.ev === evId);
+const yOf = (i: number) => 3 + i - app.aScroll;
+app.aScroll = Math.max(0, rowOf('sel-1'));   // bring it into view: the pointer only reaches what is drawn
+app.aCursor = -1; app.hoverEv = null;
+app.key({ k: 'motion', x: 40, y: yOf(rowOf('sel-1')) } as any);
+must('the pointer over a message hovers the whole message', app.hoverEv === 'sel-1');
+app.render();
+must('the hover says what y does', app.grid.toString().includes('y copies'));
+app.key({ k: 'mouse', x: 40, y: yOf(rowOf('sel-1')), button: 0, press: true } as any);
+must('clicking puts the cursor there', app.rowsAll[app.aCursor]?.ev === 'sel-1');
+type(app, 'y');
+must('y copies what the pointer is on and lights it', app.flashEv === 'sel-1' && /copied/.test(app.status));
+app.render();
+must('the flash is drawn', app.grid.toString().includes('copied'));
+app.hoverEv = null; app.aCursor = -1;
+type(app, 'y');
+must('with nothing pointed at, y takes the last thing the agent said', app.flashEv !== null && /copied/.test(app.status));
+
 // --- y copies the message under the cursor, Y the whole turn ---
 app.aCursor = app.rowsAll.findIndex((r) => r.ev === 'sel-1');
 type(app, 'y');
-must('y copies just that message', app.status.includes('message copied') || app.status.includes('pbcopy'));
+must('y copies just that message', /copied/.test(app.status) || app.status.includes('pbcopy'));
 type(app, 'Y');
 must('Y copies the whole turn', app.status.includes('turn copied') || app.status.includes('nothing to copy') || app.status.includes('pbcopy'));
 press(app, 'esc'); await settle();

@@ -2,13 +2,16 @@ export type Key =
   | { k: 'char'; c: string }
   | { k: 'up' | 'down' | 'left' | 'right' | 'enter' | 'esc' | 'tab' | 'backspace' }
   | { k: 'mouse'; x: number; y: number; button: number; press: boolean }
+  | { k: 'motion'; x: number; y: number }        // pointer moved: what the hover highlight follows
   | { k: 'wheel'; dir: -1 | 1; x: number; y: number }
   | { k: 'cellpx'; w: number; h: number }     // resposta a CSI 16 t: tamanho da célula em pixels
   | { k: 'winpx'; w: number; h: number };     // resposta a CSI 14 t: área de texto em pixels
 
 const ALT_ON = '\x1b[?1049h', ALT_OFF = '\x1b[?1049l';
 const CUR_OFF = '\x1b[?25l', CUR_ON = '\x1b[?25h';
-const MOUSE_ON = '\x1b[?1000h\x1b[?1006h', MOUSE_OFF = '\x1b[?1006l\x1b[?1000l';
+const MOUSE_ON = '\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h', MOUSE_OFF = '\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l';
+// while the terminal owns the mouse, the wheel still has to reach the app: alternate scroll sends arrows
+const ALT_SCROLL_ON = '\x1b[?1007h', ALT_SCROLL_OFF = '\x1b[?1007l';
 
 export class Screen {
   W = 80; H = 24;
@@ -31,7 +34,7 @@ export class Screen {
   setMouse(on: boolean) {
     if (!this.mouse || on === this.mouseOn) return;
     this.mouseOn = on;
-    this.write(on ? MOUSE_ON : MOUSE_OFF);
+    this.write(on ? ALT_SCROLL_OFF + MOUSE_ON : MOUSE_OFF + ALT_SCROLL_ON);
   }
 
   enter(onResize: () => void) {
@@ -76,6 +79,7 @@ export class Screen {
         if (m) {
           const b = +m[1]!, x = +m[2]! - 1, y = +m[3]! - 1, press = m[4] === 'M';
           if (b === 64 || b === 65) out.push({ k: 'wheel', dir: b === 64 ? -1 : 1, x, y });
+          else if (b & 32) out.push({ k: 'motion', x, y });   // bit 32 = the pointer moved, with or without a button
           else out.push({ k: 'mouse', x, y, button: b, press });
           i += m[0].length; continue;
         }

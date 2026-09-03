@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The transcript follows the mouse: hovering a message lights the whole block and shows `y copies` at its edge, clicking puts the cursor there, and `y` copies exactly that, flashing it green. With nothing pointed at, `y` takes the agent's last answer, so it always copies something. `Y` still takes the whole turn.
+- Selection mode scrolls: `↑↓`, the wheel (alternate scroll while the terminal owns the mouse), `g`, `G`, and page keys, with a counter in the header saying where you are.
 - In selection mode the agent's transcript is redrawn plain: no frame, no gutter, no side panel, wrapped to the whole width, so what the terminal copies is the text alone. `y` now copies the message under the cursor and `Y` the whole turn.
 - `s` hands the mouse back to the terminal so you can select and copy with it, and freezes the frame while you do (a redraw would move the text under the selection). `s` or `esc` returns. `y` still copies the whole turn under the cursor.
 

@@ -12,7 +12,7 @@ import { supportsKittyGraphics, placeImage, clearImages } from './tui/image.ts';
 import { LiveView } from './core/live.ts';
 import { BrowserMode, fitImage, toPage, inBox } from './core/cdp.ts';
 import { modeLabel } from './views/item.ts';
-import { renderAgent, rows, Row, INPUT_H, LinkChip, detailWidth, tasksFrom, PanelData, panelFits, inputLayout, SubChip, renderPlain } from './views/agent.ts';
+import { renderAgent, rows, Row, INPUT_H, LinkChip, detailWidth, tasksFrom, PanelData, panelFits, inputLayout, SubChip, renderPlain, TREE_TOP } from './views/agent.ts';
 import * as P from './core/project.ts';
 import * as A from './core/approvals.ts';
 import * as store from './core/store.ts';
@@ -468,13 +468,15 @@ export class App {
   }
 
   /** y: copia o turno sob o cursor (o que você disse, ou o que ele respondeu) para o clipboard. */
-  /** y: the message under the cursor, as it was written. Falls back to the whole turn. */
+  /** y: what the pointer is on, else what the cursor is on, else the last thing the agent said. */
   copyRow() {
-    const r = this.rowsAll[this.aCursor];
-    const e = r?.ev ? this.evs.find((x) => x.uuid === r.ev) : null;
+    const id = this.hoverEv ?? this.rowsAll[this.aCursor]?.ev
+      ?? [...this.evs].reverse().find((e) => e.role === 'assistant' && !e.tool && (e.full ?? e.text))?.uuid ?? null;
+    const e = id ? this.evs.find((x) => x.uuid === id) : null;
     const text = e ? (e.full ?? (e.tool ? `${e.tool} ${e.text ?? ''}`.trim() : e.text) ?? '') : '';
-    if (!text.trim()) return this.copyTurn();
-    this.toClipboard(text, t('message'));
+    if (!text.trim()) { this.say(t('nothing to copy here — point at a message or use Y for the turn')); return; }
+    this.flashEv = e!.uuid; this.flashUntil = Date.now() + 900; this.dirty = true;
+    this.toClipboard(text, e!.role === 'user' ? t('your message') : e!.tool ? t('the {0} call', e!.tool) : t('the answer'));
   }
   private toClipboard(text: string, what: string) {
     try {
@@ -496,22 +498,32 @@ export class App {
    * under the selection.
    */
   selecting = false;
+  selScroll = 0;
+  hoverEv: string | null = null;      // the message the pointer is over
+  flashEv: string | null = null;      // the message just copied, lit for a moment
+  private flashUntil = 0;
   toggleSelect() {
     if (this.selecting) { this.selecting = false; this.screen.setMouse(true); this.say(t('selection off — the mouse is the app\'s again')); this.dirty = true; return; }
     this.say(t('select with the mouse and copy — the screen is frozen; s or esc returns'), 3_600_000);
     this.render();
     this.selecting = true;
     this.screen.setMouse(false);
-    if (this.view === 'agent') this.paintPlain();
+    if (this.view === 'agent') { this.selScroll = -1; this.paintPlain(); }
   }
 
   /** The frozen frame for the agent view: the text alone, wrapped to the whole screen, so a copy brings text and nothing else. */
-  private paintPlain() {
+  private paintPlain(scrollBy = 0) {
     const rowsWide = rows(this.evs, this.agent?.cwd ?? '', this.expanded, Math.max(8, this.grid.W - 12), this.showThinking, this.agent?.name ?? '');
-    const at = this.rowsAll[this.aScroll]?.ev ?? this.rowsAll[this.aScroll]?.turn ?? null;   // keep the eye where it was
-    const scroll = at ? Math.max(0, rowsWide.findIndex((r) => (r.ev ?? r.turn) === at)) : Math.max(0, rowsWide.length - (this.grid.H - 1));
+    const page = this.grid.H - 1, max = Math.max(0, rowsWide.length - page);
+    if (this.selScroll < 0) {
+      const at = this.rowsAll[this.aScroll]?.ev ?? this.rowsAll[this.aScroll]?.turn ?? null;   // enter where the eye was
+      const i = at ? rowsWide.findIndex((r) => (r.ev ?? r.turn) === at) : -1;
+      this.selScroll = i >= 0 ? i : max;
+    }
+    this.selScroll = Math.max(0, Math.min(max, this.selScroll + scrollBy));
+    const scroll = this.selScroll;
     this.grid.clear();
-    renderPlain(this.grid, rowsWide, scroll, this.agent?.name ?? '', t('select and copy with the mouse — s or esc returns'));
+    renderPlain(this.grid, rowsWide, scroll, this.agent?.name ?? '', t('{0}-{1} of {2}  —  ↑↓ wheel g G scroll  —  s or esc returns', scroll + 1, Math.min(rowsWide.length, scroll + page), rowsWide.length));
     this.screen.write('\x1b[2J' + this.grid.diff(null));
     this.prev = null;   // the next real frame repaints everything
   }
@@ -705,7 +717,17 @@ export class App {
       if (k.k === 'mouse' && k.press && k.button === 0) { const h = this.grid.hitTest(k.x, k.y); if (h) { this.sel = h; this.dirty = true; if (h !== this.linking.source) void this.op(this.commitLink()); } return; }
       if (k.k === 'char' && k.c !== 'q') return;
     }
-    if (this.selecting) { if (k.k === 'esc' || (k.k === 'char' && (k.c === 's' || k.c === 'S'))) this.toggleSelect(); return; }
+    if (this.selecting) {
+      if (k.k === 'esc' || (k.k === 'char' && (k.c === 's' || k.c === 'S'))) return void this.toggleSelect();
+      if (this.view !== 'agent') return;
+      const page = Math.max(1, this.screen.H - 3);
+      const d = k.k === 'up' ? -1 : k.k === 'down' ? 1 : k.k === 'wheel' ? k.dir * 3
+        : k.k === 'char' && k.c === 'k' ? -1 : k.k === 'char' && k.c === 'j' ? 1
+        : k.k === 'char' && (k.c === 'b' || k.c === 'u') ? -page : k.k === 'char' && (k.c === ' ' || k.c === 'f') ? page
+        : k.k === 'char' && k.c === 'g' ? -1e9 : k.k === 'char' && k.c === 'G' ? 1e9 : 0;
+      if (d) this.paintPlain(d);
+      return;
+    }
     if (k.k === 'char' && k.c === 's' && !(this.view === 'agent' && this.composing) && !(this.view === 'browser' && this.typing)) return this.toggleSelect();
     if (k.k === 'char' && (k.c === 'q' || k.c === 'Q') && !(this.view === 'agent' && this.composing)) return this.askQuit();
 
@@ -778,6 +800,9 @@ export class App {
           if (k.k !== 'up' && k.k !== 'down' && k.k !== 'wheel') { this.chatInput.handle(k); this.dirty = true; return; }
         }
         const view = this.memView(), max = Math.max(0, this.rowsAll.length - view);
+        const rowAt = (y: number) => { const i = this.aScroll + (y - TREE_TOP); return y >= TREE_TOP && y < TREE_TOP + view && i >= 0 && i < this.rowsAll.length ? i : -1; };
+        if (k.k === 'motion') { const i = rowAt(k.y); const ev = i < 0 ? null : this.rowsAll[i]?.ev ?? null; if (ev !== this.hoverEv) { this.hoverEv = ev; this.dirty = true; } return; }
+        if (k.k === 'mouse' && k.press && k.button === 0) { const i = rowAt(k.y); if (i >= 0) { this.aCursor = i; this.hoverEv = this.rowsAll[i]?.ev ?? null; this.dirty = true; } return; }
         const step = (d: number) => { if (this.aCursor < 0) this.aCursor = d > 0 ? this.aScroll : Math.min(this.rowsAll.length - 1, this.aScroll + view - 1); let i = this.aCursor + d; while (i >= 0 && i < this.rowsAll.length && this.rowsAll[i]!.kind === 'blank') i += d; if (i >= 0 && i < this.rowsAll.length) this.aCursor = i; if (this.aCursor < this.aScroll) this.aScroll = this.aCursor; else if (this.aCursor >= this.aScroll + view) this.aScroll = this.aCursor - view + 1; };
         if (k.k === 'up') step(-1); else if (k.k === 'down') step(1);
         else if (k.k === 'wheel') { this.aScroll = Math.max(0, Math.min(max, this.aScroll + k.dir * 3)); this.aCursor = -1; }
@@ -825,6 +850,7 @@ export class App {
     if (this.selecting) return;   // frozen: a new frame would move the text under the selection
 
     if (this.statusUntil && Date.now() > this.statusUntil) { this.status = ''; this.statusUntil = 0; }
+    if (this.flashUntil && Date.now() > this.flashUntil) { this.flashEv = null; this.flashUntil = 0; }
     if (this.grid.W !== this.screen.W || this.grid.H !== this.screen.H) { this.grid = new Grid(this.screen.W, this.screen.H); this.prev = null; this.screen.write('\x1b[2J'); if (this.view === 'agent') this.rebuild(false); }
     this.grid.clear();
     const g = this.grid;
@@ -844,7 +870,7 @@ export class App {
     else if (this.view === 'agent' && this.agent) {
       const lay = inputLayout(this.grid.W, this.deep);
     const w = this.composing ? this.chatInput.window(lay.w) : null;
-      renderAgent(g, this.agent, this.agent.session, this.evs, this.rowsAll, this.aScroll, this.aCursor, this.status, this.watchOnly ? null : (w ? { text: w.text, cursor: w.cursorAt, deep: this.deep } : null), this.watchOnly ? null : this.live, this.chips(), this.panelData(), this.watchOnly);
+      renderAgent(g, this.agent, this.agent.session, this.evs, this.rowsAll, this.aScroll, this.aCursor, this.status, this.watchOnly ? null : (w ? { text: w.text, cursor: w.cursorAt, deep: this.deep } : null), this.watchOnly ? null : this.live, this.chips(), this.panelData(), this.watchOnly, { hover: this.hoverEv, flash: this.flashEv });
     }
     else if (this.view === 'note' && this.note) renderNote(g, this.note, this.noteScroll, this.status, this.linksOf(`note-${this.note.id}`));
     else if (this.view === 'file' && this.file) renderFile(g, this.file, this.fileLines, this.fileScroll, this.status, this.linksOf(this.file.id));
@@ -898,6 +924,6 @@ export class App {
     this.screen.onKey((k) => this.key(k));
     this.render();
     setInterval(() => { void this.load(); }, 2000);
-    setInterval(() => { if (this.pulsing()) { this.tick++; this.dirty = true; } if (this.dirty || this.statusUntil || this.chat?.busy) this.render(); }, 100);
+    setInterval(() => { if (this.pulsing()) { this.tick++; this.dirty = true; } if (this.dirty || this.statusUntil || this.flashUntil || this.chat?.busy) this.render(); }, 100);
   }
 }

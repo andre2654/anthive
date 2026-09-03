@@ -26,6 +26,7 @@ function splitTool(text: string, tool: string, cwd: string): { name: string; det
 interface Child { glyph: string; gc: RGB; name: string; nc: RGB; detail: string; dc: RGB; right: string; indent: number; tool?: string; out: number; thinking?: boolean; full?: string; thought?: string; ev?: string }
 
 /** Largura da coluna de texto para uma tela de W colunas — a mesma conta do render. */
+export const TREE_TOP = 3;   // the first row of the tree: hover and clicks map back through it
 export const PANEL_W = 34;
 export const panelFits = (W: number) => W >= 110;
 export const detailWidth = (W: number, panel = false) => Math.max(8, W - 38 - (panel && panelFits(W) ? PANEL_W : 0));
@@ -262,7 +263,7 @@ export function inputLayout(W: number, deep: boolean): { x: number; w: number; h
 export function renderAgent(
   g: Grid, n: AgentNode, s: Session | null, evs: Ev[], all: Row[], scroll: number, cursorRow: number,
   status: string, input: { text: string; cursor: number; deep?: boolean } | null, live: Live | null, chips: LinkChip[],
-  panel: PanelData | null = null, watching = false,
+  panel: PanelData | null = null, watching = false, marks: { hover?: string | null; flash?: string | null } = {},
 ) {
   const { W, H } = g;
   const withPanel = !!panel && panelFits(W);
@@ -298,9 +299,11 @@ export function renderAgent(
   const slice = all.slice(scroll, scroll + view);
   for (let i = 0; i < slice.length; i++) {
     const r = slice[i]!, y = top + i; if (r.kind === 'blank') continue;
-    const on = scroll + i === cursorRow; if (on) g.fill({ x: 1, y, w: W - 2, h: 1 }, BG.sel);
+    const on = scroll + i === cursorRow;
+    const block = !!r.ev && (r.ev === marks.hover || r.ev === marks.flash);   // the whole message the pointer is on, so you see what y takes
+    if (on || block) g.fill({ x: 1, y, w: W - 2, h: 1 }, r.ev && r.ev === marks.flash ? BG.copy : BG.sel);
     // três vozes: você numa faixa própria, o agente com o nome e uma barra ao lado, o pensamento apagado com barra pontilhada
-    const band = !on && r.voice === 'you' ? BG.input : undefined;
+    const band = !on && !block ? (r.voice === 'you' ? BG.input : undefined) : (r.ev === marks.flash ? BG.copy : BG.sel);
     if (band) g.fill({ x: nameX - 1, y, w: detailX + detailW - nameX + 1, h: 1 }, band);
     if (r.voice === 'agent') g.put(detailX - 1, y, '▎', C.link);
     if (r.voice === 'thought') g.put(detailX - 1, y, G.dV, C.sparkH);
@@ -312,6 +315,11 @@ export function renderAgent(
     else g.put(detailX, y, fit(detail, detailW), on ? C.inkHi : dc, band);
     if (r.right) g.put(rightEdge - 3 - timeW - tokW, y, padStart(r.right, tokW), C.frame);
     if (r.showTime) g.put(rightEdge - 2 - timeW, y, hhmm(r.ts), C.frame);
+    if (block && !!r.name && r.ev) {
+      const tip = r.ev === marks.flash ? ` ${t('copied')} ` : ` y ${t('copies')} `;
+      const tx = rightEdge - 2 - [...tip].length;
+      if (tx > detailX) g.put(tx, y, tip, r.ev === marks.flash ? C.run : C.link, r.ev === marks.flash ? BG.copy : BG.sel);
+    }
   }
   scrollHint(g, bottom + 1, scroll, Math.max(0, all.length - scroll - view));
   if (withPanel && panel) drawPanel(g, treeW, 3, bottom, panel);
