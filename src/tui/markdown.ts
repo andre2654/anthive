@@ -3,7 +3,7 @@
  * inline e links viram linhas de trechos coloridos, já quebradas na largura.
  * Não há negrito de verdade na grade (só cor), então ênfase é cor mais clara.
  */
-import { C, RGB } from './theme.ts';
+import { C, G, RGB } from './theme.ts';
 
 export interface Span { text: string; color: RGB }
 export type MdKind = 'h' | 'p' | 'li' | 'code' | 'quote' | 'blank' | 'hr' | 'table';
@@ -127,7 +127,7 @@ export function renderMd(text: string, width: number): MdLine[] {
       continue;
     }
     if (inCode) {
-      const chs = [...('  ' + raw)].map((ch) => ({ ch, color: C.dim }));
+      const chs: Ch[] = [{ ch: G.v, color: C.frame }, { ch: ' ', color: C.frame }, ...[...raw].map((ch) => ({ ch, color: C.quiet }))];
       out.push({ kind: 'code', spans: toSpans(chs.length > w ? [...chs.slice(0, w - 1), { ch: '…', color: C.frame }] : chs) });
       continue;
     }
@@ -152,7 +152,7 @@ export function renderMd(text: string, width: number): MdLine[] {
     const q = /^>\s?(.*)$/.exec(raw);
     if (q) {
       const prefix: Ch[] = [{ ch: '▎', color: C.linkDim }, { ch: ' ', color: C.ink }];
-      for (const l of wrapChs(inline(q[1]!, C.dim), w, prefix, prefix)) out.push({ kind: 'quote', spans: toSpans(l) });
+      for (const l of wrapChs(inline(q[1]!, C.quiet), w, prefix, prefix)) out.push({ kind: 'quote', spans: toSpans(l) });
       continue;
     }
     for (const l of wrapChs(inline(raw.trim(), C.ink), w, [], [])) out.push({ kind: 'p', spans: toSpans(l) });

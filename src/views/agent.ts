@@ -28,8 +28,17 @@ interface Child { glyph: string; gc: RGB; name: string; nc: RGB; detail: string;
 /** Largura da coluna de texto para uma tela de W colunas — a mesma conta do render. */
 export const TREE_TOP = 3;   // the first row of the tree: hover and clicks map back through it
 export const PANEL_W = 34;
+/** O painel cresce com a tela: em 34 colunas ele corta os próprios valores. */
+export const panelW = (W: number) => Math.min(46, Math.max(PANEL_W, Math.floor(W * 0.22)));
 export const panelFits = (W: number) => W >= 110;
-export const detailWidth = (W: number, panel = false) => Math.max(8, W - 38 - (panel && panelFits(W) ? PANEL_W : 0));
+export const detailWidth = (W: number, panel = false) => Math.max(8, W - 38 - (panel && panelFits(W) ? panelW(W) : 0));
+/**
+ * A largura em que a prosa é quebrada. Uma linha de 148 letras, que é o que
+ * uma tela larga dava, não se lê: o olho perde a linha na volta. O texto para
+ * de crescer aqui e o resto da tela vira margem.
+ */
+export const PROSE_MAX = 92;
+export const proseWidth = (W: number, panel = false) => Math.min(detailWidth(W, panel), PROSE_MAX);
 
 export { tasksFrom } from '../core/tasks.ts';
 export type { Task } from '../core/tasks.ts';
@@ -267,7 +276,7 @@ export function renderAgent(
 ) {
   const { W, H } = g;
   const withPanel = !!panel && panelFits(W);
-  const treeW = withPanel ? W - PANEL_W : W;
+  const treeW = withPanel ? W - panelW(W) : W;
   const ih = INPUT_H(!!input);
   const top = 3, bottom = H - 5 - ih;
   const view = Math.max(1, bottom - top + 1);
@@ -293,8 +302,11 @@ export function renderAgent(
   for (const c of chips) { const t = `${c.glyph} ${c.label}`; if (x + t.length > W - 3) break; g.put(x, 2, t, c.color); x += t.length + 3; }
 
   // árvore
-  const timeW = 8, tokW = 6, connW = 7, nameW = 9, nameX = 2 + connW + 2, detailX = nameX + nameW, detailW = detailWidth(W, withPanel);
-  const rightEdge = treeW;   // tokens e hora encostam na borda da árvore, não da tela
+  const timeW = 8, tokW = 6, connW = 7, nameW = 9, nameX = 2 + connW + 2, detailX = nameX + nameW;
+  const avail = detailWidth(W, withPanel);
+  // hora e tokens acompanham o texto em vez de flutuar na borda da tela, e o texto para antes deles
+  const rightEdge = Math.min(treeW, detailX + Math.min(avail, PROSE_MAX) + timeW + tokW + 6);
+  const detailW = Math.max(8, Math.min(avail, rightEdge - detailX - timeW - tokW - 3));
   if (!all.length) g.put(2, top + 1, s ? t('no events') : t('new session — i writes the first prompt'), C.frame);
   const slice = all.slice(scroll, scroll + view);
   for (let i = 0; i < slice.length; i++) {

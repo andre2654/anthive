@@ -1,4 +1,4 @@
-import { wrap, rows, detailWidth } from '../src/views/agent.ts';
+import { wrap, rows, detailWidth, proseWidth, panelW } from '../src/views/agent.ts';
 import { Ev } from '../src/core/sessions.ts';
 let fails = 0;
 const must = (l: string, c: boolean) => { console.log(c ? `✓ ${l}` : `✗ ${l}`); if (!c) fails++; };
@@ -8,6 +8,10 @@ must('nenhuma palavra cortada no meio', w.join(' ').replace(/\s+/g, ' ').include
 must('parágrafo vira linha em branco', w.includes(''));
 must('palavra gigante é partida, não some', wrap('a'.repeat(95), 40).length === 3);
 must('largura de texto para 100 colunas é 62', detailWidth(100) === 62);
+// a prosa para de crescer: uma linha de 148 letras não se lê
+must('numa tela larga a prosa é limitada, a coluna de ferramenta não', proseWidth(240, true) === 92 && detailWidth(240, true) > 92);
+must('numa tela estreita a prosa usa o que tem', proseWidth(100) === detailWidth(100));
+must('o painel cresce com a tela, com teto', panelW(132) === 34 && panelW(200) === 44 && panelW(400) === 46);
 const ev = (o: Partial<Ev>): Ev => ({ uuid: crypto.randomUUID(), parent: null, sidechain: false, type: 'assistant', ts: 1, role: 'assistant', text: '', ...o });
 const long = 'x'.repeat(30) + ' ' + 'y'.repeat(30) + ' ' + 'z'.repeat(30);
 const rs = rows([ev({ type: 'user', role: 'user', text: 'ola', full: 'ola' }), ev({ text: long, full: long })], '', new Set(), 40);

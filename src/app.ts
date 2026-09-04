@@ -12,7 +12,7 @@ import { supportsKittyGraphics, placeImage, clearImages } from './tui/image.ts';
 import { LiveView } from './core/live.ts';
 import { BrowserMode, fitImage, toPage, inBox } from './core/cdp.ts';
 import { modeLabel } from './views/item.ts';
-import { renderAgent, rows, Row, INPUT_H, LinkChip, detailWidth, tasksFrom, PanelData, panelFits, inputLayout, SubChip, renderPlain, TREE_TOP } from './views/agent.ts';
+import { renderAgent, rows, Row, INPUT_H, LinkChip, detailWidth, tasksFrom, PanelData, panelFits, inputLayout, SubChip, renderPlain, TREE_TOP, proseWidth, PROSE_MAX } from './views/agent.ts';
 import * as P from './core/project.ts';
 import * as A from './core/approvals.ts';
 import * as store from './core/store.ts';
@@ -450,7 +450,7 @@ export class App {
   lastLoadedPath = '';
   private memView() { return Math.max(1, this.grid.H - 8 - INPUT_H(this.composing)); }
   private rebuild(toBottom: boolean) {
-    this.rowsAll = rows(this.evs, this.agent?.cwd ?? '', this.expanded, detailWidth(this.grid.W, this.showPanel), this.showThinking, this.agent?.name ?? '');
+    this.rowsAll = rows(this.evs, this.agent?.cwd ?? '', this.expanded, proseWidth(this.grid.W, this.showPanel), this.showThinking, this.agent?.name ?? '');
     const max = Math.max(0, this.rowsAll.length - this.memView());
     if (toBottom) { this.aScroll = max; this.aCursor = -1; } else this.aScroll = Math.min(this.aScroll, max);
     this.dirty = true;
@@ -545,7 +545,7 @@ export class App {
 
   /** The frozen frame for the agent view: the text alone, wrapped to the whole screen, so a copy brings text and nothing else. */
   private paintPlain(scrollBy = 0) {
-    const rowsWide = rows(this.evs, this.agent?.cwd ?? '', this.expanded, Math.max(8, this.grid.W - 12), this.showThinking, this.agent?.name ?? '');
+    const rowsWide = rows(this.evs, this.agent?.cwd ?? '', this.expanded, Math.min(PROSE_MAX, Math.max(8, this.grid.W - 12)), this.showThinking, this.agent?.name ?? '');
     const page = this.grid.H - 1, max = Math.max(0, rowsWide.length - page);
     if (this.selScroll < 0) {
       const at = this.rowsAll[this.aScroll]?.ev ?? this.rowsAll[this.aScroll]?.turn ?? null;   // enter where the eye was

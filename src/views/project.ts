@@ -49,6 +49,8 @@ const SPARK: Record<State, RGB> = { running: C.sparkR, waiting: C.sparkH, idle: 
 const hhmm = (ts: number) => new Date(ts).toTimeString().slice(0, 5);
 export const KIND_GLYPH = { agent: G.running, note: G.note, file: '▤', service: '◎', task: G.focus, sub: G.sub, wrote: '▥', browser: '▣' } as const;
 export const PANEL_W = 34;
+/** O painel cresce com a tela: em 34 colunas ele corta os próprios valores. */
+export const panelW = (W: number) => Math.min(46, Math.max(PANEL_W, Math.floor(W * 0.22)));
 export const panelFits = (W: number) => W >= 110;
 const TASK_H = 3, BROWSER_H = 4, SUB_H = 3, SUB_INDENT = 3, WROTE_H = 3;   // subagents hang under their agent, indented
 
@@ -74,7 +76,7 @@ function assignLanes(spans: { key: string; y0: number; y1: number }[]): { lanes:
 }
 
 export function layoutProject(v: View, W: number, scroll = 0, panel = false, H = 40): ProjectLayout {
-  const pw = panel && panelFits(W) ? PANEL_W : 0;
+  const pw = panel && panelFits(W) ? panelW(W) : 0;
   const avail = W - 4 - pw;
   const agents = v.nodes.filter((n): n is AgentNode => n.kind === 'agent');
   const items = (['note', 'task', 'browser', 'wrote', 'file', 'service'] as const).flatMap((kind) => v.nodes.filter((x) => x.kind === kind));
@@ -294,7 +296,7 @@ const nodeName = (n: Node) => n.kind === 'agent' ? n.name : n.kind === 'note' ? 
 
 /** Painel à direita: o que vale saber do nó selecionado sem entrar nele. */
 function drawNodePanel(g: Grid, v: View, n: Node, top: number, bottom: number) {
-  const x = g.W - PANEL_W + 2, w = g.W - 2 - x;
+  const x = g.W - panelW(g.W) + 2, w = g.W - 2 - x;
   let y = top;
   for (let yy = top; yy <= bottom; yy++) g.put(x - 2, yy, G.v, C.frame);
   const head = (t: string) => { if (y <= bottom) { g.put(x, y, t, C.link); g.put(x + t.length + 1, y, G.h.repeat(Math.max(0, w - t.length - 1)), C.frame); } y++; };
