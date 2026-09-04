@@ -9,6 +9,8 @@ export class TextInput {
   constructor(initial = '') { this.set(initial); }
 
   set(v: string) { this.chars = [...v]; this.cursor = this.chars.length; }
+  /** Texto colado: entra inteiro no cursor, sem virar tecla a tecla. */
+  insert(v: string) { const cs = [...v]; this.chars.splice(this.cursor, 0, ...cs); this.cursor += cs.length; }
   get value() { return this.chars.join(''); }
   get empty() { return this.chars.length === 0; }
 

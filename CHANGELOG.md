@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Cmd+V does as much as a terminal allows. Pastes now arrive whole (bracketed paste), so a two-line paste stops sending the turn at the first newline and types the rest into an empty box; a pasted path to an image file, which is what Cmd+V gives you for a file copied in Finder, becomes an attached image instead of a path; and opening the box with an image on the clipboard says which key actually attaches it. A raw bitmap on the clipboard still cannot reach any terminal app on Cmd+V — Claude Code itself tells macOS users "control+v (not cmd+v!)".
 - Paste an image into a turn. No terminal hands an image to the app on Cmd+V, so `ctrl-v` in the input box reads the clipboard itself and attaches what it finds: the picture appears above the box as a thumbnail, backspace on an empty line drops the last one, and the turn goes out with the image before the text. Reading goes straight to the pasteboard, which takes 0.4 s where the AppleScript coercion took 5.6 s. Up to four images per turn.
 
 - Real weight, not just colour: the grid carries a bold bit, so headings, `**emphasis**` and the names of who is speaking are actually bold. Each of your turns gets a blank line before it.

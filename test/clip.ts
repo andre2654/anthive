@@ -44,5 +44,28 @@ const boxes = thumbBoxes(120, 30, 3);
 must('as miniaturas ficam lado a lado, acima da caixa', boxes.length === 3 && boxes[1]!.x > boxes[0]!.x && boxes.every((b) => b.y > 0 && b.y < 30 - 4));
 must('mais de quatro imagens não estouram a tira', thumbBoxes(120, 30, 9).length === 4);
 
+// --- colagem entre colchetes: o texto de duas linhas não manda o turno pela metade ---
+const { Screen } = await import('../src/tui/screen.ts');
+const sc = new Screen({ mouse: false });
+const ks = sc.feed('\x1b[200~linha um\nlinha dois\x1b[201~');
+must('a colagem chega inteira, sem enter no meio', ks.length === 1 && ks[0]!.k === 'paste' && (ks[0] as any).text === 'linha um\nlinha dois');
+must('e montada mesmo partida em duas leituras', sc.feed('\x1b[200~parte um\n').length === 0 && (sc.feed('parte dois\x1b[201~')[0] as any).text === 'parte um\nparte dois');
+must('fora da colagem o teclado segue igual', sc.feed('oi').map((k) => (k as any).c).join('') === 'oi');
+
+// --- um caminho de imagem colado vira anexo; texto continua texto ---
+const { imagePaths } = await import('../src/core/clip.ts');
+const png = `${process.cwd()}/docs/map.png`;
+must('caminho de imagem existente vira anexo', (await imagePaths(png)).length === 1);
+must('file:// também', (await imagePaths(`file://${png}`)).length === 1);
+must('texto comum continua texto', (await imagePaths('olha isto')).length === 0 && (await imagePaths('/tmp/nao-existe.png')).length === 0);
+must('caminho misturado com frase é texto', (await imagePaths(`${png}\numa frase`)).length === 0);
+
+// --- o campo recebe a colagem inteira ---
+const { TextInput } = await import('../src/tui/input.ts');
+const inp = new TextInput('ab');
+inp.handle({ k: 'left' } as any);
+inp.insert('XY');
+must('a colagem entra no cursor', inp.value === 'aXYb');
+
 console.log(fails ? `\n${fails} failure(s)` : '\nall green');
 process.exit(fails ? 1 : 0);

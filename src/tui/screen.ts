@@ -3,11 +3,15 @@ export type Key =
   | { k: 'up' | 'down' | 'left' | 'right' | 'enter' | 'esc' | 'tab' | 'backspace' }
   | { k: 'mouse'; x: number; y: number; button: number; press: boolean }
   | { k: 'motion'; x: number; y: number }        // pointer moved: what the hover highlight follows
+  | { k: 'paste'; text: string }                 // colagem entre colchetes: chega inteira, não tecla a tecla
   | { k: 'wheel'; dir: -1 | 1; x: number; y: number }
   | { k: 'cellpx'; w: number; h: number }     // resposta a CSI 16 t: tamanho da célula em pixels
   | { k: 'winpx'; w: number; h: number };     // resposta a CSI 14 t: área de texto em pixels
 
 const ALT_ON = '\x1b[?1049h', ALT_OFF = '\x1b[?1049l';
+// colagem entre colchetes: sem isso um texto de duas linhas vira enter no meio e manda o turno pela metade
+const PASTE_ON = '\x1b[?2004h', PASTE_OFF = '\x1b[?2004l';
+const PASTE_START = '\x1b[200~', PASTE_END = '\x1b[201~';
 const CUR_OFF = '\x1b[?25l', CUR_ON = '\x1b[?25h';
 const MOUSE_ON = '\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h', MOUSE_OFF = '\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l';
 // while the terminal owns the mouse, the wheel still has to reach the app: alternate scroll sends arrows
@@ -39,7 +43,7 @@ export class Screen {
 
   enter(onResize: () => void) {
     this.onResize = onResize;
-    process.stdout.write(ALT_ON + CUR_OFF + (this.mouse ? MOUSE_ON : '') + '\x1b[2J');
+    process.stdout.write(ALT_ON + CUR_OFF + PASTE_ON + (this.mouse ? MOUSE_ON : '') + '\x1b[2J');
     this.askCellSize();
     if (process.stdin.isTTY) process.stdin.setRawMode(true);
     process.stdin.resume();
@@ -59,7 +63,7 @@ export class Screen {
   restore() {
     if (this.restored) return;
     this.restored = true;
-    process.stdout.write((this.mouse && this.mouseOn ? MOUSE_OFF : '') + CUR_ON + ALT_OFF);
+    process.stdout.write((this.mouse && this.mouseOn ? MOUSE_OFF : '') + PASTE_OFF + CUR_ON + ALT_OFF);
     if (process.stdin.isTTY) try { process.stdin.setRawMode(false); } catch {}
     process.stdin.pause();
   }
@@ -104,7 +108,30 @@ export class Screen {
     return out;
   }
 
+  private paste: string | null = null;
+  /** Junta os pedaços de uma colagem antes de traduzir o resto: ela pode chegar em várias leituras. */
+  feed(chunk: string): Key[] {
+    let s = chunk;
+    const out: Key[] = [];
+    while (s) {
+      if (this.paste !== null) {
+        const end = s.indexOf(PASTE_END);
+        if (end < 0) { this.paste += s; return out; }
+        out.push({ k: 'paste', text: this.paste + s.slice(0, end) });
+        this.paste = null;
+        s = s.slice(end + PASTE_END.length);
+        continue;
+      }
+      const start = s.indexOf(PASTE_START);
+      if (start < 0) { out.push(...Screen.parse(s)); return out; }
+      if (start) out.push(...Screen.parse(s.slice(0, start)));
+      this.paste = '';
+      s = s.slice(start + PASTE_START.length);
+    }
+    return out;
+  }
+
   onKey(fn: (k: Key) => void) {
-    process.stdin.on('data', (d: Buffer) => { for (const k of Screen.parse(d.toString('utf8'))) fn(k); });
+    process.stdin.on('data', (d: Buffer) => { for (const k of this.feed(d.toString('utf8'))) fn(k); });
   }
 }

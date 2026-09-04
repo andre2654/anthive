@@ -15,7 +15,7 @@ import { modeLabel } from './views/item.ts';
 import { renderAgent, rows, Row, INPUT_H, LinkChip, detailWidth, tasksFrom, PanelData, panelFits, inputLayout, SubChip, renderPlain, TREE_TOP, proseWidth, PROSE_MAX, thumbBoxes } from './views/agent.ts';
 import * as P from './core/project.ts';
 import * as A from './core/approvals.ts';
-import { Pasted, pasteImage, readB64 } from './core/clip.ts';
+import { Pasted, pasteImage, attachFile, imagePaths, clipboardTypes, hasImage, readB64 } from './core/clip.ts';
 import * as store from './core/store.ts';
 import { ROOT } from './core/store.ts';
 import * as bus from './core/bus.ts';
@@ -564,6 +564,27 @@ export class App {
     this.prev = null;   // the next real frame repaints everything
   }
 
+  /**
+   * Uma colagem do terminal. Cmd+V com um arquivo copiado no Finder cola o
+   * caminho: aqui ele vira a imagem. Com um bitmap no clipboard o terminal não
+   * manda nada, e por isso existe o ctrl-v.
+   */
+  async onPaste(text: string) {
+    if (this.view === 'browser' && this.typing) { this.page?.text(text); return; }
+    if (this.view !== 'agent' || !this.composing) return;
+    const paths = await imagePaths(text).catch(() => []);
+    if (paths.length) {
+      for (const p of paths.slice(0, 4 - this.pastes.length)) {
+        const img = await attachFile(p).catch(() => null);
+        if (img) this.pastes.push({ ...img, data: await readB64(img.path) });
+      }
+      this.say(t('{0} image{1} attached from the paste', this.pastes.length, this.pastes.length > 1 ? 's' : ''), 4000);
+    } else {
+      this.chatInput.insert(text.replace(/\r\n?/g, '\n'));
+    }
+    this.dirty = true;
+  }
+
   /** ctrl-v: a imagem do clipboard entra no próximo turno. O terminal nunca entrega imagem colada sozinho. */
   async pasteFromClipboard() {
     if (this.pastes.length >= 4) { this.say(t('four images is the limit for one turn'), 4000); return; }
@@ -573,6 +594,11 @@ export class App {
     this.pastes.push({ ...img, data: await readB64(img.path) });
     this.say(t('image {0} attached — {1} KB', this.pastes.length, Math.round(img.bytes / 1024)), 4000);
     this.dirty = true;
+  }
+  /** Com imagem no clipboard, avisa qual é a tecla: o Cmd+V não chega até aqui. */
+  private async hintClipboard() {
+    if (this.pastes.length || !hasImage(await clipboardTypes().catch(() => ''))) return;
+    if (this.composing) this.say(t('image in the clipboard — ctrl-v attaches it (cmd+v cannot reach the terminal)'), 6000);
   }
   private dropPaste() { const gone = this.pastes.pop(); if (gone) { this.say(t('image dropped')); this.dirty = true; } return !!gone; }
 
@@ -769,6 +795,7 @@ export class App {
       if (k.k === 'mouse' && k.press && k.button === 0) { const h = this.grid.hitTest(k.x, k.y); if (h) { this.sel = h; this.dirty = true; if (h !== this.linking.source) void this.op(this.commitLink()); } return; }
       if (k.k === 'char' && k.c !== 'q') return;
     }
+    if (k.k === 'paste') { void this.op(this.onPaste(k.text)); return; }   // colagem inteira, antes de qualquer tecla
     if (this.selecting) {
       if (k.k === 'esc' || (k.k === 'char' && (k.c === 's' || k.c === 'S'))) return void this.toggleSelect();
       if (this.view !== 'agent') return;
@@ -867,9 +894,9 @@ export class App {
         else if (k.k === 'esc') { this.view = 'project'; void this.op(this.load()); }
         else if (k.k === 'char') {
           if (k.c === 'i' && this.watchOnly) this.say(t('a subagent: watch only — its parent talks to it'), 4000);
-          else if (k.c === 'i') { this.deep = false; this.composing = true; if (!this.chat) void this.op(this.startChat()); }
+          else if (k.c === 'i') { this.deep = false; this.composing = true; void this.hintClipboard(); if (!this.chat) void this.op(this.startChat()); }
       else if (k.c === 'D' && this.watchOnly) this.say(t('a subagent: watch only — its parent talks to it'), 4000);
-      else if (k.c === 'D') { this.composing = true; this.setDeep(true); if (!this.chat) void this.op(this.startChat()); }
+      else if (k.c === 'D') { this.composing = true; this.setDeep(true); void this.hintClipboard(); if (!this.chat) void this.op(this.startChat()); }
           else if (k.c === 'm') this.pickSetting('model'); else if (k.c === 'e') this.pickSetting('effort'); else if (k.c === 'p') this.pickSetting('permissionMode');
           else if (k.c === 'l' && this.agent) this.pickLinkTarget(this.agent.id);
           else if (k.c === 'x') this.closeChat();
@@ -923,7 +950,8 @@ export class App {
     }
     else if (this.view === 'agent' && this.agent) {
       const lay = inputLayout(this.grid.W, this.deep);
-    const w = this.composing ? this.chatInput.window(lay.w) : null;
+    const win = this.composing ? this.chatInput.window(lay.w) : null;
+    const w = win ? { ...win, text: win.text.replace(/\n/g, '↵') } : null;   // a quebra vira glifo: a grade não desenha \n
       renderAgent(g, this.agent, this.agent.session, this.evs, this.rowsAll, this.aScroll, this.aCursor, this.status, this.watchOnly ? null : (w ? { text: w.text, cursor: w.cursorAt, deep: this.deep } : null), this.watchOnly ? null : this.live, this.chips(), this.panelData(), this.watchOnly, { hover: this.hoverEv, flash: this.flashEv }, this.composing ? this.pastes.map((p) => ({ name: `${Math.round(p.bytes / 1024)} KB`, bytes: p.bytes })) : []);
     }
     else if (this.view === 'note' && this.note) renderNote(g, this.note, this.noteScroll, this.status, this.linksOf(`note-${this.note.id}`));
