@@ -34,9 +34,9 @@ const TAIL = 4 * 1024 * 1024;   // a turn lives at the end of the transcript
 const SHORT: Record<string, string> = { WebSearch: 'search', WebFetch: 'fetch', mcp__anthive__project_search: 'hive' };
 
 const safeJSON = (l: string): any | null => { try { return JSON.parse(l); } catch { return null; } };
-const textOf = (c: unknown): string => typeof c === 'string' ? c : Array.isArray(c) ? c.filter((b: any) => b?.type === 'text').map((b: any) => String(b.text ?? '')).join('\n') : '';
-/** Something you said: not a tool result, not a subagent line, not the harness talking. */
-const isTurn = (o: any): boolean => {
+export const textOf = (c: unknown): string => typeof c === 'string' ? c : Array.isArray(c) ? c.filter((b: any) => b?.type === 'text').map((b: any) => String(b.text ?? '')).join('\n') : '';
+/** Something you said: not a tool result, not a subagent line, not the harness talking. Shared with written.ts. */
+export const isTurn = (o: any): boolean => {
   if (o?.type !== 'user' || o.isSidechain || o.isMeta) return false;
   const c = o.message?.content;
   if (Array.isArray(c) && c.some((b: any) => b?.type === 'tool_result')) return false;

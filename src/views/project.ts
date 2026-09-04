@@ -11,7 +11,7 @@ import { t } from '../i18n.ts';
 export { snapshotRefs };
 import { C, G, BG, RGB, sparkline, ago, tok, pad, padStart, fit } from '../tui/theme.ts';
 import { State, windowOf } from '../core/sessions.ts';
-import { View, Node, Edge, AgentNode, TaskNode, projectName, SubNode } from '../core/project.ts';
+import { View, Node, Edge, AgentNode, TaskNode, projectName, SubNode, WroteNode } from '../core/project.ts';
 import { threadState } from '../core/store.ts';
 import { windowOf as winOf } from '../core/sessions.ts';
 import { renderMd } from '../tui/markdown.ts';
@@ -26,10 +26,10 @@ const GLYPH: Record<State, string> = { running: G.running, waiting: G.waiting, i
 const COLOR: Record<State, RGB> = { running: C.run, waiting: C.hold, idle: C.idle, stuck: C.dead, sleeping: C.frame };
 const LABEL = (s: State) => ({ running: t('running'), waiting: t('approval'), idle: t('idle'), stuck: t('stuck'), sleeping: t('asleep') })[s];
 const SPARK: Record<State, RGB> = { running: C.sparkR, waiting: C.sparkH, idle: C.sparkI, stuck: C.sparkD, sleeping: C.sparkI };
-export const KIND_GLYPH = { agent: G.running, note: G.note, file: '▤', service: '◎', task: G.focus, sub: G.sub, browser: '▣' } as const;
+export const KIND_GLYPH = { agent: G.running, note: G.note, file: '▤', service: '◎', task: G.focus, sub: G.sub, wrote: '▥', browser: '▣' } as const;
 export const PANEL_W = 34;
 export const panelFits = (W: number) => W >= 110;
-const TASK_H = 3, BROWSER_H = 4, SUB_H = 3, SUB_INDENT = 3;   // subagents hang under their agent, indented
+const TASK_H = 3, BROWSER_H = 4, SUB_H = 3, SUB_INDENT = 3, WROTE_H = 3;   // subagents hang under their agent, indented
 
 export interface Path { cells: [number, number][]; from: string; to: string }
 export interface ProjectLayout {
@@ -56,8 +56,8 @@ export function layoutProject(v: View, W: number, scroll = 0, panel = false): Pr
   const pw = panel && panelFits(W) ? PANEL_W : 0;
   const avail = W - 4 - pw;
   const agents = v.nodes.filter((n): n is AgentNode => n.kind === 'agent');
-  const items = (['note', 'task', 'browser', 'file', 'service'] as const).flatMap((kind) => v.nodes.filter((x) => x.kind === kind));
-  const hOf = (n: Node) => n.kind === 'agent' ? AGENT_H : n.kind === 'note' ? NOTE_H : n.kind === 'file' ? (n.item.context ? NOTE_H : FILE_H) : n.kind === 'task' ? TASK_H : n.kind === 'sub' ? SUB_H : n.kind === 'browser' ? BROWSER_H : SERVICE_H;
+  const items = (['note', 'task', 'browser', 'wrote', 'file', 'service'] as const).flatMap((kind) => v.nodes.filter((x) => x.kind === kind));
+  const hOf = (n: Node) => n.kind === 'agent' ? AGENT_H : n.kind === 'note' ? NOTE_H : n.kind === 'file' ? (n.item.context ? NOTE_H : FILE_H) : n.kind === 'task' ? TASK_H : n.kind === 'sub' ? SUB_H : n.kind === 'wrote' ? WROTE_H : n.kind === 'browser' ? BROWSER_H : SERVICE_H;
 
   // 1) alturas primeiro: não dependem da largura da calha
   const yOf = new Map<string, number>();
@@ -92,7 +92,7 @@ export function layoutProject(v: View, W: number, scroll = 0, panel = false): Pr
     return { key: key(e), y0: Math.min(yl, yr), y1: Math.max(yl, yr) };
   });
   const { lanes, count } = assignLanes(spans);
-  const gutter = Math.max(MIN_GUTTER, 2 + count * LANE_STEP + 2);
+  const gutter = Math.min(Math.max(MIN_GUTTER, 2 + count * LANE_STEP + 2), Math.max(MIN_GUTTER, Math.floor(avail / 3)));   // muitas faixas não podem zerar a coluna da direita
 
   // 3) agora as larguras e as caixas
   const leftW = Math.min(34, Math.max(24, Math.floor((avail - gutter) / 2)));
@@ -181,7 +181,7 @@ function itemBox(g: Grid, n: Node, r: Rect, on: boolean, src: boolean) {
   const inner = r.w - 4;
   if (on || src) g.fill(r, BG.sel);
   const border = src ? C.hold : on ? C.link : C.frame;
-  const title = n.kind === 'note' ? t('note') : n.kind === 'file' ? (n.item.context ? t('context') : t('file')) : n.kind === 'task' ? t('task') : n.kind === 'browser' ? 'browser' : t('service');
+  const title = n.kind === 'note' ? t('note') : n.kind === 'file' ? (n.item.context ? t('context') : t('file')) : n.kind === 'task' ? t('task') : n.kind === 'wrote' ? (n.agent ? t('made') : t('changed')) : n.kind === 'browser' ? 'browser' : t('service');
   const ttl = title;
   g.frame(r, `${src ? G.tool + ' ' : ''}${ttl}`, src ? C.hold : on ? C.link : C.linkDim, border);
   const home = process.env.HOME ?? '';
@@ -204,6 +204,12 @@ function itemBox(g: Grid, n: Node, r: Rect, on: boolean, src: boolean) {
     const glyph = st === 'completed' ? G.running : st === 'in_progress' ? G.focus : G.idle;
     const col = st === 'completed' ? C.run : st === 'in_progress' ? C.hold : C.dim;
     g.put(r.x + 2, r.y + 1, pad(`${glyph} ${n.task.subject}`, inner), col);
+  } else if (n.kind === 'wrote') {
+    const mark = n.group.length ? '▦' : '▥';
+    const right = n.group.length ? t('{0} files', n.group.length) : n.count > 1 ? `${n.count}x` : '';
+    const col = n.how === 'seen' ? C.dim : C.ink;
+    g.put(r.x + 2, r.y + 1, pad(`${mark} ${n.label}`, Math.max(1, inner - (right ? right.length + 2 : 0))), col);
+    if (right) g.put(r.x + 2 + inner - right.length, r.y + 1, right, C.frame);
   } else if (n.kind === 'browser') {
     const st = n.state;
     const l1 = st.busy ? `${G.running} ${browserShort(st.lastTool ?? 'browser_')}…` : `▣ chrome (${modeLabel(n.item.mode)})${st.live ? ` ${G.running} ${t('live')}` : ''}  ${G.h}  ${st.title || t('no page yet')}`;
@@ -253,7 +259,7 @@ function drawPath(g: Grid, p: Path, e: Edge, W: number, arrow = true) {
 
 export interface ProjectOpts { linkSource?: string | null; tick?: number; query?: string; panel?: boolean }
 
-const nodeName = (n: Node) => n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.kind === 'sub' ? n.sub.name : n.kind === 'browser' ? 'browser' : n.item.name;
+const nodeName = (n: Node) => n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.kind === 'sub' ? n.sub.name : n.kind === 'wrote' ? n.label : n.kind === 'browser' ? 'browser' : n.item.name;
 
 /** Painel à direita: o que vale saber do nó selecionado sem entrar nele. */
 function drawNodePanel(g: Grid, v: View, n: Node, top: number, bottom: number) {
@@ -266,7 +272,7 @@ function drawNodePanel(g: Grid, v: View, n: Node, top: number, bottom: number) {
   const links = v.edges.filter((e) => e.from === n.id || e.to === n.id).map((e) => v.nodes.find((m) => m.id === (e.from === n.id ? e.to : e.from))).filter((m): m is Node => !!m);
   const home = process.env.HOME ?? '';
 
-  head(n.kind === 'agent' ? t('agent') : n.kind === 'note' ? t('note') : n.kind === 'file' ? t('file') : n.kind === 'task' ? t('task') : n.kind === 'sub' ? t('subagent') : n.kind === 'browser' ? 'browser' : t('service'));
+  head(n.kind === 'agent' ? t('agent') : n.kind === 'note' ? t('note') : n.kind === 'file' ? t('file') : n.kind === 'task' ? t('task') : n.kind === 'sub' ? t('subagent') : n.kind === 'wrote' ? (n.agent ? t('made') : t('changed')) : n.kind === 'browser' ? 'browser' : t('service'));
   if (n.kind === 'agent') {
     const s = n.session;
     row(t('name'), n.name, C.inkHi);
@@ -314,6 +320,13 @@ function drawNodePanel(g: Grid, v: View, n: Node, top: number, bottom: number) {
     const snap = snapshotRefs(n.state.snapshot).slice(0, 8);
     if (!snap.length) row('', t('none yet'), C.dim);
     for (const it of snap) row(it.ref, it.text, C.dim);
+  } else if (n.kind === 'wrote') {
+    const from = v.nodes.find((m) => m.id === n.agent);
+    row(t('made'), n.label, C.inkHi);
+    row(t('by'), from && from.kind === 'agent' ? from.name : t('nobody claims it'), n.agent ? C.link : C.dim);
+    row(t('how'), n.how === 'tool' ? t('a write tool') : n.how === 'shell' ? t('the shell') : t('found on disk'));
+    row(t('when'), ago(Date.now() - n.ts));
+    if (n.group.length) { y++; head(`${t('files')} (${n.group.length})`); for (const f of n.group.slice(0, 10)) row('', `${G.tool} ${f}`, C.ink); }
   } else {
     row(t('service'), `${n.item.name}${n.item.port ? `:${n.item.port}` : ''}`, C.inkHi);
     row(t('state'), n.alive ? `${G.running} ${t('alive')}` : `${G.stuck} ${t('dead')}`, n.alive ? C.run : C.dead);
@@ -339,7 +352,8 @@ export function renderProject(g: Grid, v: View, selected: string | null, scroll:
   g.put(13 + tt.length, 0, fit(`${G.h} ${v.project.cwd.replace(home, '~')} `, Math.max(0, W - 40 - t.length)), C.dim);
   const nA = v.nodes.filter((n) => n.kind === 'agent').length, nN = v.nodes.filter((n) => n.kind === 'note').length;
   const nF = v.nodes.filter((n) => n.kind === 'file').length, nS = v.nodes.filter((n) => n.kind === 'service').length, nT = v.nodes.filter((n) => n.kind === 'task').length, nSub = v.nodes.filter((n) => n.kind === 'sub').length;
-  const counts = [nA && t('{0} agent{1}', nA, nA > 1 ? 's' : ''), nN && t('{0} note{1}', nN, nN > 1 ? 's' : ''), nT && t('{0} task{1}', nT, nT > 1 ? 's' : ''), nSub && t('{0} subagent{1}', nSub, nSub > 1 ? 's' : ''), nF && t('{0} file{1}', nF, nF > 1 ? 's' : ''), nS && t('{0} service{1}', nS, nS > 1 ? 's' : '')].filter(Boolean).join(` ${G.h} `);
+  const nW = v.nodes.filter((n): n is WroteNode => n.kind === 'wrote').reduce((k, n) => k + Math.max(1, n.group.length), 0);
+  const counts = [nA && t('{0} agent{1}', nA, nA > 1 ? 's' : ''), nN && t('{0} note{1}', nN, nN > 1 ? 's' : ''), nT && t('{0} task{1}', nT, nT > 1 ? 's' : ''), nSub && t('{0} subagent{1}', nSub, nSub > 1 ? 's' : ''), nW && t('{0} produced', nW), nF && t('{0} file{1}', nF, nF > 1 ? 's' : ''), nS && t('{0} service{1}', nS, nS > 1 ? 's' : '')].filter(Boolean).join(` ${G.h} `);
   if (counts) g.put(W - 4 - counts.length, 0, ` ${counts} `, C.dim);
 
   const vis = (r: Rect) => r.y >= top && r.y + r.h - 1 <= bottom;

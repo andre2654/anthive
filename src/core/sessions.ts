@@ -27,6 +27,8 @@ export interface Session {
   lastText: string;      // o que ele está fazendo agora
   pendingTool: string | null;
   pendingInput: string;  // argumentos da ferramenta parada, para você decidir
+  started: number;       // epoch ms do nascimento do transcript: há quanto tempo a sessão existe
+  recent: string[];      // as últimas ferramentas, como o painel as mostra
 }
 
 export interface Ev {
@@ -161,6 +163,10 @@ export async function summarize(path: string): Promise<Session | null> {
     context = contextOf(u);
   }
 
+  // as últimas ferramentas chamadas, na ordem, para o painel
+  const recent: string[] = [];
+  for (const e of evs) { const d = describe(e); if (d.tool) recent.push(d.text); }
+
   // ferramenta pendente = último tool_use sem tool_result correspondente
   let pendingTool: string | null = null;
   let pendingInput = '';
@@ -204,6 +210,8 @@ export async function summarize(path: string): Promise<Session | null> {
     lastText: desc.text,
     pendingTool,
     pendingInput,
+    started: st.birthtimeMs || st.mtimeMs,
+    recent: recent.slice(-5),
   };
 }
 

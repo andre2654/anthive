@@ -16,6 +16,7 @@ import * as store from './store.ts';
 import { Session, Ev, listSessions, sessionById, parseSession, PROJECTS } from './sessions.ts';
 import { Task, tasksOfSession } from './tasks.ts';
 import { Subagent, subagentsOfSession } from './subagents.ts';
+import { Write, How, writesOfSession, changedFiles, relTo, folderOf } from './written.ts';
 import { pending } from './approvals.ts';
 import { sessionGone } from './procs.ts';
 import { SYSTEM_PREAMBLE, BROWSER_PREAMBLE } from './chat.ts';
@@ -369,11 +370,13 @@ export interface FileNode { kind: 'file'; id: string; item: FileItem; exists: bo
 export interface ServiceNode { kind: 'service'; id: string; item: ServiceItem; alive: boolean }
 export interface TaskNode { kind: 'task'; id: string; task: Task; agent: string }   // agent = id do nó do agente
 export interface SubNode { kind: 'sub'; id: string; sub: Subagent; agent: string }   // a subagent of the last turn of that agent
+/** Um arquivo que saiu do trabalho: escrito por ferramenta, pelo shell, ou só visto no disco. */
+export interface WroteNode { kind: 'wrote'; id: string; label: string; path: string; how: How; count: number; ts: number; agent: string | null; group: string[] }
 export interface BrowserState { url: string; title: string; snapshot: string; console: string; image?: { media: string; data: string }; lastTool?: string; counts?: string; busy: boolean; live?: boolean }
 export interface BrowserNode { kind: 'browser'; id: string; item: BrowserItem; state: BrowserState }
-export type Node = AgentNode | NoteNode | FileNode | ServiceNode | TaskNode | SubNode | BrowserNode;
+export type Node = AgentNode | NoteNode | FileNode | ServiceNode | TaskNode | SubNode | WroteNode | BrowserNode;
 
-export interface Edge { from: string; to: string; kind: 'talk' | 'context' | 'assoc' | 'task' | 'sub'; thread?: store.Doc }
+export interface Edge { from: string; to: string; kind: 'talk' | 'context' | 'assoc' | 'task' | 'sub' | 'wrote'; thread?: store.Doc }
 export interface View { project: Project; nodes: Node[]; edges: Edge[] }
 
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -454,6 +457,51 @@ export async function view(p: Project): Promise<View> {
     if (it.kind === 'service') nodes.push({ kind: 'service', id: it.id, item: it, alive: alive(it.pid) });
   }
 
+  // o trabalho: arquivos que os agentes produziram, dos transcripts e do disco.
+  // Uma pasta é um nó só, com o dono de quem mais escreveu nela; passa a ser
+  // arquivo por arquivo quando o projeto todo produziu cinco ou menos.
+  const onMap = new Set<string>(nodes.filter((n): n is FileNode => n.kind === 'file').map((n) => n.item.path));
+  const work = new Map<string, Write & { agent: string | null }>();
+  let oldest = Date.now();
+  for (const a of nodes.filter((n): n is AgentNode => n.kind === 'agent')) {
+    if (!a.session) continue;
+    oldest = Math.min(oldest, a.session.started || a.session.mtime);
+    for (const w of await writesOfSession(a.session.path, a.session.bytes, a.name, [p.cwd, a.cwd]).catch(() => [] as Write[])) {
+      if (onMap.has(w.path)) continue;
+      const cur = work.get(w.path);
+      if (!cur) work.set(w.path, { ...w, agent: a.id });
+      else { cur.count += w.count; cur.ts = Math.max(cur.ts, w.ts); }
+    }
+  }
+  // o que só o disco sabe: uma planilha gerada por um script que o agente rodou
+  for (const f of await changedFiles(p.cwd, oldest).catch(() => [])) {
+    if (onMap.has(f.path) || work.has(f.path)) continue;
+    work.set(f.path, { path: f.path, how: 'seen', count: 1, ts: f.ts, by: '', agent: null });
+  }
+  const all = [...work.values()].sort((x, y) => y.ts - x.ts);
+  const wrote: WroteNode[] = [];
+  if (all.length && all.length <= 5) {
+    for (const w of all) wrote.push({ kind: 'wrote', id: `wrote-${relTo(p.cwd, w.path)}`, label: relTo(p.cwd, w.path), path: w.path, how: w.how, count: w.count, ts: w.ts, agent: w.agent, group: [] });
+  } else {
+    const dirs = new Map<string, (Write & { agent: string | null })[]>();
+    for (const w of all) { const d = folderOf(p.cwd, w.path); const list = dirs.get(d); if (list) list.push(w); else dirs.set(d, [w]); }
+    for (const [dir, ws] of dirs) {
+      const votes = new Map<string, number>();
+      for (const w of ws) if (w.agent) votes.set(w.agent, (votes.get(w.agent) ?? 0) + 1);
+      const owner = [...votes.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+      wrote.push({
+        kind: 'wrote', id: `wrote-dir-${dir}`, label: dir === '.' ? `${p.name}/` : `${dir}/`, path: dir === '.' ? p.cwd : join(p.cwd, dir),
+        how: ws.some((w) => w.how === 'tool') ? 'tool' : ws.some((w) => w.how === 'shell') ? 'shell' : 'seen',
+        count: ws.reduce((n, w) => n + w.count, 0), ts: Math.max(...ws.map((w) => w.ts)), agent: owner,
+        group: ws.map((w) => basename(w.path)),
+      });
+    }
+  }
+  for (const n of wrote.sort((x, y) => y.ts - x.ts).slice(0, 8)) {
+    nodes.push(n);
+    if (n.agent) edges.push({ from: n.agent, to: n.id, kind: 'wrote' });
+  }
+
   // ligações: conversas (store), acesso a nota (ACL), e as genéricas do grafo
   const agentByName = new Map(nodes.filter((n): n is AgentNode => n.kind === 'agent').map((n) => [n.name, n]));
   for (const d of docs) {
@@ -486,7 +534,7 @@ export function buildBriefing(v: View, agentName: string, prompt: string): strin
   const notes = v.nodes.filter((n): n is NoteNode => n.kind === 'note');
   const files = v.nodes.filter((n): n is FileNode => n.kind === 'file');
   const svcs = v.nodes.filter((n): n is ServiceNode => n.kind === 'service');
-  const nameOf = (id: string) => { const n = v.nodes.find((x) => x.id === id); return !n ? id : n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.kind === 'sub' ? n.sub.name : n.item.name; };
+  const nameOf = (id: string) => { const n = v.nodes.find((x) => x.id === id); return !n ? id : n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.kind === 'sub' ? n.sub.name : n.kind === 'wrote' ? n.label : n.item.name; };
   const ctx = files.filter((f) => f.item.context);
   const ctxLine = ctx.length
     ? `Environment context: ${ctx.map((f) => `${f.item.label} (${f.lines ?? '?'} lines)`).join(' and ')} — read it first; it describes how this project runs, tests and is organized.`
@@ -517,7 +565,7 @@ export function parseBriefingReply(v: View, text: string): string[] {
   const wanted = m[1]!.split(/[,;]/).map((s) => s.trim().toLowerCase()).filter((s) => s && s !== 'nothing' && s !== 'none' && s !== 'nada');
   const ids: string[] = [];
   for (const n of v.nodes) {
-    if (n.kind === 'task' || n.kind === 'sub') continue;
+    if (n.kind === 'task' || n.kind === 'sub' || n.kind === 'wrote') continue;
     const label = (n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.item.name).toLowerCase();
     const alt = n.kind === 'note' ? n.doc.id.toLowerCase() : n.kind === 'file' ? n.item.path.toLowerCase() : '';
     if (wanted.some((w) => w === label || w === alt || label.includes(w) || alt.endsWith(w))) ids.push(n.id);

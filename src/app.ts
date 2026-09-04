@@ -32,7 +32,7 @@ type Modal =
   | { kind: 'pick'; title: string; items: PickItem[]; index: number; note?: string; submit: (v: string) => Promise<string> }
   | { kind: 'approval'; req: A.Request; linkable: string | null };
 
-const nodeLabel = (n: P.Node) => n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.kind === 'sub' ? n.sub.name : n.kind === 'browser' ? 'browser' : n.item.name;
+const nodeLabel = (n: P.Node) => n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.kind === 'sub' ? n.sub.name : n.kind === 'wrote' ? n.label : n.kind === 'browser' ? 'browser' : n.item.name;
 
 export class App {
   screen = new Screen();
@@ -194,6 +194,15 @@ export class App {
     if (n.kind === 'file') { this.file = n.item; this.fileScroll = 0; this.fileLines = await readFile(n.item.path, 'utf8').then((t) => t.split('\n')).catch(() => null); this.view = 'file'; }
     if (n.kind === 'service') { this.service = n.item; this.svcStats = await svc.stats(n.item.pid); this.view = 'service'; }
     if (n.kind === 'task') { this.task = n; this.view = 'task'; }
+    if (n.kind === 'wrote') {
+      const path = n.group.length ? join(n.path, n.group[0]!) : n.path;
+      this.file = { kind: 'file', id: n.id, path, label: basename(path), created: n.ts };
+      this.fileScroll = 0;
+      this.fileLines = await readFile(path, 'utf8').then((t) => t.split('\n')).catch(() => null);
+      this.view = 'file';
+      this.dirty = true;
+      return;
+    }
     if (n.kind === 'sub') {
       // a subagent opens as a read-only transcript: the same tree as an agent, no chat
       if (!n.sub.path) { this.say(t('no transcript yet — it is still starting'), 3000); return; }
@@ -389,10 +398,21 @@ export class App {
   }
   async commitLink() {
     const src = this.linking?.source, dst = this.sel; if (!src || !dst) return;
-    if (this.node(dst)?.kind === 'sub') { this.say(t('a subagent cannot be linked — link its parent'), 4000); this.linking = null; this.dirty = true; return; }
-    if (src === dst) { this.say(t('pick another node')); return; }
+    for (const id of [src, dst]) {
+      const n = this.node(id);
+      if (n?.kind !== 'wrote' || !this.project) continue;
+      // um nó derivado não pode virar ponta de ligação no grafo: vira arquivo do projeto primeiro
+      const path = n.group.length ? join(n.path, n.group[0]!) : n.path;
+      const it = await P.addFile(this.project.id, path).catch(() => null);
+      if (!it) { this.say(t('{0} is gone', n.label), 4000); this.linking = null; this.dirty = true; return; }
+      await this.load();
+      if (id === src) this.linking = { source: it.id }; else this.sel = it.id;
+    }
+    const from = this.linking?.source, to = this.sel; if (!from || !to) return;
+    if (this.node(to)?.kind === 'sub') { this.say(t('a subagent cannot be linked — link its parent'), 4000); this.linking = null; this.dirty = true; return; }
+    if (from === to) { this.say(t('pick another node')); return; }
     this.linking = null;
-    try { const msg = await this.connect(src, dst); if (msg) { await this.load(); this.say(msg, 4000); } }
+    try { const msg = await this.connect(from, to); if (msg) { await this.load(); this.say(msg, 4000); } }
     catch (e) { this.say((e as Error).message, 5000); }
     this.dirty = true;
   }
@@ -403,6 +423,7 @@ export class App {
     if (n.kind === 'agent' && !n.item) { this.say(t('a discovered session cannot be removed — it lives on disk'), 4000); return; }
     if (n.kind === 'task') { this.say(t('the task belongs to the agent — it closes it with TaskUpdate'), 4000); return; }
     if (n.kind === 'sub') { this.say(t('a subagent lives inside its parent\'s turn — it ends by itself'), 4000); return; }
+    if (n.kind === 'wrote') { this.say(t('this came out of the work — l pins it to the project, d cannot unmake it'), 5000); return; }
     if (n.kind === 'file' && n.item.context) { this.say(t('Claude context file — read every session; edit with e, it cannot be unlinked'), 5000); return; }
     const what = n.kind === 'note' ? t('delete the note "{0}"?', n.doc.title) : n.kind === 'file' ? t('unlink {0} from the project?', n.item.label) : n.kind === 'service' ? t('remove {0} from the project?', n.item.name) : n.kind === 'browser' ? t('remove the browser from the project?') : t('remove agent {0}?', n.name);
     const lines = n.kind === 'note' ? [t('the note file is deleted')] : n.kind === 'file' ? [t('the file stays on disk; it only leaves the map')] : n.kind === 'service' ? [t('the process keeps running; it only leaves the map')] : n.kind === 'browser' ? [t('Chrome closes; the playwright entry stays in .mcp.json')] : [t('the transcript stays; so does the worktree')];
