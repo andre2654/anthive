@@ -123,6 +123,16 @@ renderProject(gs, app.pv!, null, 0, '', {});
 must('com a tela cheia a faixa some sozinha', !gs.toString().includes('history ─'));
 must('a roda não passa do fim do mapa', (app as any).mapMax() >= 0);
 
+// --- o painel complementa a caixa em vez de repeti-la ---
+const { renderProject: rp2 } = await import('../src/views/project.ts');
+const { Grid: G2 } = await import('../src/tui/grid.ts');
+const agentId = app.pv!.nodes.find((n) => n.kind === 'agent')!.id;
+const gp = new G2(130, 30);
+rp2(gp, app.pv!, agentId, 0, '', { panel: true });
+const sp = gp.toString();
+must('o painel mostra o que a caixa não cabe', sp.includes('up ') && sp.includes('last actions') && sp.includes('produced'));
+must('e não repete estado nem o que ele está fazendo', !sp.includes('doing now'));
+
 // --- a caixa cresce com o conteúdo e com a tela ---
 const { layoutProject, agentH } = await import('../src/views/project.ts');
 const wide = layoutProject(app.pv!, 200, 0, false, 40);

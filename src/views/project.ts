@@ -300,20 +300,33 @@ function drawNodePanel(g: Grid, v: View, n: Node, top: number, bottom: number) {
   const head = (t: string) => { if (y <= bottom) { g.put(x, y, t, C.link); g.put(x + t.length + 1, y, G.h.repeat(Math.max(0, w - t.length - 1)), C.frame); } y++; };
   const row = (k: string, val: string, col: RGB = C.ink) => { if (y <= bottom) { g.put(x, y, pad(k, 9), C.frame); g.put(x + 9, y, fit(val, w - 9), col); } y++; };
   const text = (t: string, col: RGB = C.dim, max = 6) => { for (const l of renderMd(t, w).slice(0, max)) { if (y > bottom) break; let sx = x; for (const sp of l.spans) { g.put(sx, y, fit(sp.text, Math.max(0, x + w - sx)), sp.color === C.ink ? col : sp.color); sx += [...sp.text].length; } y++; } };
-  const links = v.edges.filter((e) => e.from === n.id || e.to === n.id).map((e) => v.nodes.find((m) => m.id === (e.from === n.id ? e.to : e.from))).filter((m): m is Node => !!m);
+  const links = v.edges.filter((e) => e.from === n.id || e.to === n.id).map((e) => v.nodes.find((m) => m.id === (e.from === n.id ? e.to : e.from))).filter((m): m is Node => !!m && m.kind !== 'wrote');
   const home = process.env.HOME ?? '';
 
   head(n.kind === 'agent' ? t('agent') : n.kind === 'note' ? t('note') : n.kind === 'file' ? t('file') : n.kind === 'task' ? t('task') : n.kind === 'sub' ? t('subagent') : n.kind === 'wrote' ? (n.agent ? t('made') : t('changed')) : n.kind === 'browser' ? 'browser' : t('service'));
   if (n.kind === 'agent') {
+    // a caixa já diz nome, estado, o que ele faz e o contexto: aqui vai o que não cabe lá
     const s = n.session;
-    row(t('name'), n.name, C.inkHi);
-    row(t('state'), s ? `${GLYPH[s.state]} ${LABEL(s.state)}  ${ago(s.ageMs)}` : t('no session'), s ? COLOR[s.state] : C.dim);
-    if (s) { const win = winOf(s.model, s.context); row(t('context'), `${gauge(s.context / win, 8)} ${Math.round((100 * s.context) / win)}%`, s.context / win > 0.85 ? C.hold : C.run); row(t('model'), s.model || '—'); row('branch', n.item?.worktree ?? s.branch); }
-    y++; head(t('doing now')); text(s?.lastText.replace(/^(\w+ )?cd \S+\s*(&&\s*)?/, '$1') || t('nothing yet'), C.ink, 4);
+    if (!s) { row(t('state'), t('no session'), C.dim); }
+    else {
+      row(t('up'), ago(Date.now() - (s.started || s.mtime)));
+      row(t('model'), s.model || '—');
+      row('branch', n.item?.worktree ?? s.branch);
+      row(t('wrote'), `${tok(s.burn)} ${t('tokens')}`);
+      y++; head(t('last actions'));
+      if (!s.recent.length) row('', t('nothing yet'), C.dim);
+      for (const r of [...s.recent].reverse()) row('', `${G.tool} ${r.replace(v.project.cwd + '/', '').replace(home, '~')}`, C.dim);
+    }
+    const made = v.nodes.filter((m): m is WroteNode => m.kind === 'wrote' && m.agent === n.id);
+    if (made.length) {
+      y++; head(`${t('produced')} (${made.reduce((k, m) => k + Math.max(1, m.group.length), 0)})`);
+      for (const m of made.slice(0, 4)) row('', `${m.group.length ? '▦' : '▥'} ${m.label}`, C.link);
+    }
     const tasks = v.nodes.filter((m): m is TaskNode => m.kind === 'task' && m.agent === n.id);
-    y++; head(`${t('tasks')}${tasks.length ? ` (${tasks.length})` : ''}`);
-    if (!tasks.length) row('', t('none'), C.dim);
-    for (const t of tasks.slice(0, 5)) row('', `${t.task.status === 'completed' ? G.running : t.task.status === 'in_progress' ? G.focus : G.idle} ${t.task.subject}`, t.task.status === 'completed' ? C.run : t.task.status === 'in_progress' ? C.hold : C.dim);
+    if (tasks.length) {
+      y++; head(`${t('tasks')} (${tasks.length})`);
+      for (const k of tasks.slice(0, 5)) row('', `${k.task.status === 'completed' ? G.running : k.task.status === 'in_progress' ? G.focus : G.idle} ${k.task.subject}`, k.task.status === 'completed' ? C.run : k.task.status === 'in_progress' ? C.hold : C.dim);
+    }
   } else if (n.kind === 'note') {
     row(t('title'), n.doc.title, C.inkHi);
     row(t('life'), n.doc.ttl ? t('ephemeral, {0}', ago(n.doc.ttl - Date.now())) : t('persistent'));
