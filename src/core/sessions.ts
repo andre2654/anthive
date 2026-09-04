@@ -111,6 +111,15 @@ export function describe(o: any): { text: string; tool: string | null; full?: st
   if (typeof c === 'string') return { text: c.replace(/\s+/g, ' ').trim(), tool: null, full: c.trim() };
   if (Array.isArray(c)) {
     const thinking = c.filter((b: any) => b?.type === 'thinking' && b.thinking).map((b: any) => String(b.thinking).trim()).join('\n\n') || undefined;
+    // imagem colada num turno seu: marca no texto e guarda a primeira, para quem quiser desenhar
+    const pics = c.filter((b: any) => b?.type === 'image' && b.source?.data);
+    if (pics.length) {
+      const mark = pics.map(() => '[image]').join(' ');
+      const said = c.filter((b: any) => b?.type === 'text' && b.text?.trim()).map((b: any) => String(b.text).trim()).join('\n');
+      const first = pics[0];
+      return { text: `${mark}${said ? ' ' + said.replace(/\s+/g, ' ') : ''}`, tool: null, full: `${mark}${said ? '\n\n' + said : ''}`, thinking,
+        image: { media: String(first.source.media_type ?? 'image/png'), data: String(first.source.data) } };
+    }
     for (let i = c.length - 1; i >= 0; i--) {
       const b = c[i];
       if (b?.type === 'tool_use') {

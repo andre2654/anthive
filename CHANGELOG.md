@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Paste an image into a turn. No terminal hands an image to the app on Cmd+V, so `ctrl-v` in the input box reads the clipboard itself and attaches what it finds: the picture appears above the box as a thumbnail, backspace on an empty line drops the last one, and the turn goes out with the image before the text. Reading goes straight to the pasteboard, which takes 0.4 s where the AppleScript coercion took 5.6 s. Up to four images per turn.
+
 - Real weight, not just colour: the grid carries a bold bit, so headings, `**emphasis**` and the names of who is speaking are actually bold. Each of your turns gets a blank line before it.
 - The chat reads like text again on a wide screen. Prose wraps at 92 characters instead of stretching to 148, the hour and the token count follow the text instead of floating at the far edge, code and quote blocks are legible rather than grey, and the side panel grows with the terminal so it stops cutting its own values.
 

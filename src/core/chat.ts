@@ -167,10 +167,14 @@ export class ChatSession {
   }
 
   /** Um turno seu. Devolve false se o processo não está de pé. */
-  send(text: string): boolean {
+  send(text: string, images: { media: string; data: string }[] = []): boolean {
     const p = this.proc;
     if (!p || !p.stdin || typeof p.stdin === 'number') return false;
-    const line = JSON.stringify({ type: 'user', message: { role: 'user', content: text } });
+    // com imagem o conteúdo vira blocos, e a imagem vem antes do texto: é o que a API recomenda para perguntas sobre ela
+    const content = images.length
+      ? [...images.map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.media, data: i.data } })), ...(text ? [{ type: 'text', text }] : [])]
+      : text;
+    const line = JSON.stringify({ type: 'user', message: { role: 'user', content } });
     p.stdin.write(line + '\n');
     p.stdin.flush();
     this.busy = true;

@@ -258,7 +258,18 @@ export function renderPlain(g: Grid, all: Row[], scroll: number, name: string, h
 }
 
 /** Altura da caixa de escrita no rodapé: 3 linhas quando aberta, 1 quando fechada. */
-export const INPUT_H = (open: boolean) => (open ? 3 : 1);
+export const THUMB_ROWS = 6;   // a tira de imagens coladas, acima da caixa: moldura de 5 linhas e um respiro
+const THUMB_W = 16, THUMB_MAX = 4;
+export const INPUT_H = (open: boolean, thumbs = 0) => (open ? 3 : 1) + (thumbs ? THUMB_ROWS : 0);
+/**
+ * Onde cada miniatura fica, em células: as células de dentro da moldura.
+ * O desenho de verdade é o protocolo Kitty, depois do diff.
+ */
+export function thumbBoxes(W: number, H: number, n: number): { x: number; y: number; cols: number; rows: number }[] {
+  const y0 = H - 4 - INPUT_H(true, n) + 1;   // o topo do bloco reservado
+  const fit = Math.max(1, Math.floor((W - 6) / THUMB_W));
+  return Array.from({ length: Math.min(n, THUMB_MAX, fit) }, (_, i) => ({ x: 4 + i * THUMB_W, y: y0 + 1, cols: THUMB_W - 2, rows: 3 }));
+}
 
 /** The chip shown at the left of the text row when the turn is a deep search. */
 export const DEEP_CHIP = '[deep]';
@@ -273,11 +284,12 @@ export function renderAgent(
   g: Grid, n: AgentNode, s: Session | null, evs: Ev[], all: Row[], scroll: number, cursorRow: number,
   status: string, input: { text: string; cursor: number; deep?: boolean } | null, live: Live | null, chips: LinkChip[],
   panel: PanelData | null = null, watching = false, marks: { hover?: string | null; flash?: string | null } = {},
+  attach: { name: string; bytes: number }[] = [],
 ) {
   const { W, H } = g;
   const withPanel = !!panel && panelFits(W);
   const treeW = withPanel ? W - panelW(W) : W;
-  const ih = INPUT_H(!!input);
+  const ih = INPUT_H(!!input, input ? attach.length : 0);
   const top = 3, bottom = H - 5 - ih;
   const view = Math.max(1, bottom - top + 1);
   g.frame({ x: 0, y: 0, w: W, h: H }, `${G.running} ${n.name}`, C.inkHi);
@@ -336,8 +348,21 @@ export function renderAgent(
   scrollHint(g, bottom + 1, scroll, Math.max(0, all.length - scroll - view));
   if (withPanel && panel) drawPanel(g, treeW, 3, bottom, panel);
 
-  // a caixa de escrita
-  const by = H - 4 - ih + 1;
+  // a tira de imagens coladas fica logo acima da caixa: a imagem em si é desenhada depois do diff
+  const boxes = input && attach.length ? thumbBoxes(W, H, attach.length) : [];
+  for (let i = 0; i < boxes.length; i++) {
+    const b = boxes[i]!, a = attach[i]!;
+    g.frame({ x: b.x - 1, y: b.y - 1, w: b.cols + 2, h: b.rows + 2 }, a.name, C.link, C.frame);
+  }
+  if (boxes.length) {
+    const more = attach.length > boxes.length ? ` +${attach.length - boxes.length}` : '';
+    const tx = 4 + boxes.length * 16 + 1;
+    g.put(tx, boxes[0]!.y, fit(t('{0} image{1} in this turn{2}', attach.length, attach.length > 1 ? 's' : '', more), Math.max(0, W - tx - 2)), C.link);
+    g.put(tx, boxes[0]!.y + 1, fit(t('⌫ on an empty line drops the last'), Math.max(0, W - tx - 2)), C.frame);
+  }
+
+  // a caixa de escrita, sempre encostada no rodapé
+  const by = H - 4 - INPUT_H(!!input) + 1;
   if (input) {
     const deep = !!input.deep, lay = inputLayout(W, deep);
     g.panel({ x: 1, y: by, w: W - 2, h: 3 }, BG.panel);
@@ -355,7 +380,7 @@ export function renderAgent(
   }
   g.put(0, H - 3, G.teeL + G.h.repeat(W - 2) + G.teeR, C.frame);
   keybar(g, H - 2, input
-    ? [['↵', input.deep ? t('research') : t('send')], ['tab', input.deep ? t('plain turn') : t('deep search')], ['esc', t('leave the field')]]
+    ? [['↵', input.deep ? t('research') : t('send')], ['^v', t('paste image')], ['tab', input.deep ? t('plain turn') : t('deep search')], ['esc', t('leave the field')]]
     : watching
     ? [['↑↓', t('navigate')], ['↵', t('turn')], ['t', t('thoughts')], ['y', t('copy')], ['s', t('select')], ['esc', t('project')]]
     : [['i', t('write')], ['D', t('deep')], ['↑↓', t('navigate')], ['↵', t('turn')], ['t', t('thoughts')], ['y', t('copy')], ['s', t('select')], ['m', t('model')], ['e', t('effort')], ['p', t('permissions')], ['l', t('link')], ...(live ? ([['x', t('stop chat')]] as [string, string][]) : []), ['esc', t('project')]], status);

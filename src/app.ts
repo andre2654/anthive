@@ -12,9 +12,10 @@ import { supportsKittyGraphics, placeImage, clearImages } from './tui/image.ts';
 import { LiveView } from './core/live.ts';
 import { BrowserMode, fitImage, toPage, inBox } from './core/cdp.ts';
 import { modeLabel } from './views/item.ts';
-import { renderAgent, rows, Row, INPUT_H, LinkChip, detailWidth, tasksFrom, PanelData, panelFits, inputLayout, SubChip, renderPlain, TREE_TOP, proseWidth, PROSE_MAX } from './views/agent.ts';
+import { renderAgent, rows, Row, INPUT_H, LinkChip, detailWidth, tasksFrom, PanelData, panelFits, inputLayout, SubChip, renderPlain, TREE_TOP, proseWidth, PROSE_MAX, thumbBoxes } from './views/agent.ts';
 import * as P from './core/project.ts';
 import * as A from './core/approvals.ts';
+import { Pasted, pasteImage, readB64 } from './core/clip.ts';
 import * as store from './core/store.ts';
 import { ROOT } from './core/store.ts';
 import * as bus from './core/bus.ts';
@@ -448,7 +449,7 @@ export class App {
 
   // ------------------------------------------------------------ agente
   lastLoadedPath = '';
-  private memView() { return Math.max(1, this.grid.H - 8 - INPUT_H(this.composing)); }
+  private memView() { return Math.max(1, this.grid.H - 8 - INPUT_H(this.composing, this.composing ? this.pastes.length : 0)); }
   private rebuild(toBottom: boolean) {
     this.rowsAll = rows(this.evs, this.agent?.cwd ?? '', this.expanded, proseWidth(this.grid.W, this.showPanel), this.showThinking, this.agent?.name ?? '');
     const max = Math.max(0, this.rowsAll.length - this.memView());
@@ -475,6 +476,7 @@ export class App {
     return out;
   }
   /** A model/effort/permission change asked mid-turn: applied by a restart when the answer arrives. */
+  private thumbKey = '';
   private pendingPatch: Partial<Pick<ChatSession, 'model' | 'effort' | 'permissionMode'>> | null = null;
   private get live() { const c = this.chat; return c ? { model: c.model, effort: c.effort, permissionMode: c.permissionMode, deep: c.deep, busy: c.busy, thinking: c.thinking, summary: c.summary, cost: c.cost, subs: this.subChips() } : null; }
   /** The subagents of the open agent, as the map read them from their own files. */
@@ -529,6 +531,8 @@ export class App {
    * The screen freezes while you do, otherwise the next frame moves the text
    * under the selection.
    */
+  /** Imagens coladas do clipboard, esperando o próximo turno. */
+  pastes: (Pasted & { data: string })[] = [];
   selecting = false;
   selScroll = 0;
   hoverEv: string | null = null;      // the message the pointer is over
@@ -559,6 +563,18 @@ export class App {
     this.screen.write('\x1b[2J' + this.grid.diff(null));
     this.prev = null;   // the next real frame repaints everything
   }
+
+  /** ctrl-v: a imagem do clipboard entra no próximo turno. O terminal nunca entrega imagem colada sozinho. */
+  async pasteFromClipboard() {
+    if (this.pastes.length >= 4) { this.say(t('four images is the limit for one turn'), 4000); return; }
+    this.say(t('reading the clipboard…'), 4000);
+    const img = await pasteImage().catch(() => null);
+    if (!img) { this.say(t('no image in the clipboard — copy one and press ctrl-v again'), 5000); return; }
+    this.pastes.push({ ...img, data: await readB64(img.path) });
+    this.say(t('image {0} attached — {1} KB', this.pastes.length, Math.round(img.bytes / 1024)), 4000);
+    this.dirty = true;
+  }
+  private dropPaste() { const gone = this.pastes.pop(); if (gone) { this.say(t('image dropped')); this.dirty = true; } return !!gone; }
 
   /** The transcript open is a subagent's: it is watched, never talked to. */
   private get watchOnly() { return !!this.agent?.id.startsWith('sub-'); }
@@ -619,14 +635,18 @@ export class App {
     this.dirty = true;
   }
   sendChat() {
-    const text = this.chatInput.value.trim(); if (!text) return;
+    const text = this.chatInput.value.trim();
+    if (!text && !this.pastes.length) return;
     if (!this.chat) { this.say(t('opening the chat… send again in a moment')); void this.op(this.startChat()); return; }
     if (this.chat.busy) { this.say(t('wait for the answer to finish')); return; }
     // the chip was turned on while the answer was running: the process gets the web tools now, before this turn
     if (this.deep && !this.chat.deep) this.chat.restart({ deep: true, effort: this.prefs.effort || DEEP_EFFORT });
     const sent = this.deep ? deepPrompt(text) : text;
-    if (!this.chat.send(sent)) { this.say(t('chat went down — i reopens')); this.chat = null; return; }
-    this.evs.push({ uuid: crypto.randomUUID(), parent: null, sidechain: false, type: 'user', ts: Date.now(), role: 'user', text: sent, full: sent });
+    const imgs = this.pastes.map((p) => ({ media: p.media, data: p.data }));
+    if (!this.chat.send(sent, imgs)) { this.say(t('chat went down — i reopens')); this.chat = null; return; }
+    const mark = imgs.length ? `${imgs.map(() => `[${t('image')}]`).join(' ')}${sent ? ' ' : ''}` : '';
+    this.evs.push({ uuid: crypto.randomUUID(), parent: null, sidechain: false, type: 'user', ts: Date.now(), role: 'user', text: mark + sent, full: mark + sent, image: this.pastes[0] ? { media: this.pastes[0].media, data: this.pastes[0].data } : undefined });
+    this.pastes = [];
     this.rebuild(true); this.chatInput.set('');
   }
   /** The [deep] chip. Turning it on for a live chat that cannot search yet restarts it once (same session) with the web tools. */
@@ -829,6 +849,8 @@ export class App {
           if (k.k === 'esc') { this.composing = false; this.dirty = true; return; }
           if (k.k === 'enter') { this.sendChat(); return; }
       if (k.k === 'tab') { this.setDeep(!this.deep); return; }
+          if (k.k === 'char' && k.c === '\x16') { void this.op(this.pasteFromClipboard()); return; }   // ctrl-v
+          if (k.k === 'backspace' && !this.chatInput.value && this.pastes.length) { this.dropPaste(); return; }
           if (k.k !== 'up' && k.k !== 'down' && k.k !== 'wheel') { this.chatInput.handle(k); this.dirty = true; return; }
         }
         const view = this.memView(), max = Math.max(0, this.rowsAll.length - view);
@@ -902,7 +924,7 @@ export class App {
     else if (this.view === 'agent' && this.agent) {
       const lay = inputLayout(this.grid.W, this.deep);
     const w = this.composing ? this.chatInput.window(lay.w) : null;
-      renderAgent(g, this.agent, this.agent.session, this.evs, this.rowsAll, this.aScroll, this.aCursor, this.status, this.watchOnly ? null : (w ? { text: w.text, cursor: w.cursorAt, deep: this.deep } : null), this.watchOnly ? null : this.live, this.chips(), this.panelData(), this.watchOnly, { hover: this.hoverEv, flash: this.flashEv });
+      renderAgent(g, this.agent, this.agent.session, this.evs, this.rowsAll, this.aScroll, this.aCursor, this.status, this.watchOnly ? null : (w ? { text: w.text, cursor: w.cursorAt, deep: this.deep } : null), this.watchOnly ? null : this.live, this.chips(), this.panelData(), this.watchOnly, { hover: this.hoverEv, flash: this.flashEv }, this.composing ? this.pastes.map((p) => ({ name: `${Math.round(p.bytes / 1024)} KB`, bytes: p.bytes })) : []);
     }
     else if (this.view === 'note' && this.note) renderNote(g, this.note, this.noteScroll, this.status, this.linksOf(`note-${this.note.id}`));
     else if (this.view === 'file' && this.file) renderFile(g, this.file, this.fileLines, this.fileScroll, this.status, this.linksOf(this.file.id));
@@ -923,6 +945,16 @@ export class App {
     }
     const wasFull = this.prev === null;
     this.screen.write(g.diff(this.prev)); this.prev = g.snapshot(); this.dirty = false;
+    // as imagens coladas: mesma mecânica da página ao vivo, ids próprios
+    if (this.view === 'agent' && this.composing && this.pastes.length && supportsKittyGraphics()) {
+      const boxes = thumbBoxes(this.grid.W, this.grid.H, this.pastes.length);
+      const key = this.pastes.map((p) => p.path).join('|') + `:${this.grid.W}x${this.grid.H}`;
+      if (key !== this.thumbKey || wasFull) {
+        this.screen.write(boxes.map((b, i) => placeImage(this.pastes[i]!.data, b.x, b.y, b.cols, b.rows, 20 + i)).join(''));
+        this.thumbKey = key;
+      }
+    } else if (this.thumbKey) { this.screen.write([20, 21, 22, 23].map((i) => `\x1b_Ga=d,d=i,i=${i},q=2\x1b\\`).join('')); this.thumbKey = ''; }
+
     // a página ao vivo vai como imagem de verdade, depois do diff, só quando há frame novo (ou num redesenho completo)
     if (this.view === 'browser' && this.imgBox && this.page?.frame) {
       const fr = this.page.frame, b = this.imgBox, key = `${fr.at}:${b.x}:${b.y}:${b.cols}:${b.rows}`;
