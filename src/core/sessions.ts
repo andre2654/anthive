@@ -137,11 +137,21 @@ function deriveState(ageMs: number, pendingTool: string | null): State {
   return 'sleeping';
 }
 
-/** Resumo barato de uma sessão: só o fim do arquivo. */
+/**
+ * Resumo barato de uma sessão: só o fim do arquivo, e só quando ele mudou.
+ * O mapa chama isto para dezenas de transcripts a cada 2 s; a idade e o estado
+ * são recalculados sempre, que é o que muda sozinho com o relógio.
+ */
+const sums = new Map<string, { size: number; mtime: number; s: Session }>();
 export async function summarize(path: string): Promise<Session | null> {
   let st;
   try { st = await stat(path); } catch { return null; }
   if (st.size === 0) return null;
+  const hit = sums.get(path);
+  if (hit && hit.size === st.size && hit.mtime === st.mtimeMs) {
+    const ageMs = Date.now() - st.mtimeMs;
+    return { ...hit.s, ageMs, state: deriveState(ageMs, hit.s.pendingTool) };
+  }
 
   const evs = await tailLines(path, TAIL);
   if (!evs.length) return null;
@@ -192,7 +202,7 @@ export async function summarize(path: string): Promise<Session | null> {
   const ageMs = Date.now() - mtime;
   const desc = describe(lastAssistant ?? last);
 
-  return {
+  const out: Session = {
     id: basename(path).slice(0, 8),
     path,
     project: basename(join(path, '..')).replace(/^-Users-[^-]+-/, '').replace(/-/g, '/'),
@@ -213,6 +223,8 @@ export async function summarize(path: string): Promise<Session | null> {
     started: st.birthtimeMs || st.mtimeMs,
     recent: recent.slice(-5),
   };
+  sums.set(path, { size: st.size, mtime: st.mtimeMs, s: out });
+  return out;
 }
 
 /** Todas as sessões, mais recentes primeiro. `limit` corta antes de ler conteúdo. */

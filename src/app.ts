@@ -67,7 +67,13 @@ export class App {
   say(msg: string, ms = 3000) { this.status = msg; this.statusUntil = Date.now() + ms; this.dirty = true; }
 
   // ------------------------------------------------------------ carregar
+  private loading = false;
   async load() {
+    if (this.loading) return;   // uma carga lenta não pode empilhar com a próxima
+    this.loading = true;
+    try { await this.loadInner(); } finally { this.loading = false; }
+  }
+  private async loadInner() {
     if (this.view === 'home' || !this.project) {
       this.cards = await P.homeCards();
       const keys = [...this.cards.map((_, i) => `proj:${i}`), 'new'];

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The map refresh went from about 150 ms to 5 ms: session summaries are cached by size and modification time, with age and state still recomputed every tick, the transcript parse behind the browser state is cached the same way, and a slow refresh can no longer stack on the next one.
 - The map panel stops repeating the box. For an agent it now shows how long the session has been up, the model and branch, the tokens it burned, its last five tool calls, what it produced and its open tasks, and files it produced are no longer listed twice.
 - Agent boxes grow with the screen instead of stopping at 34 columns: wide enough for the whole sentence of what the agent is doing, up to 60, and with three or fewer agents they gain two rows for the last tools and the open tasks. The context reads as a gauge with a percentage, the same measure the panel shows.
 - A history strip fills the empty part of the map: the last turns, the subagents that ran and the files that were written, oldest first, with the hour and who did it. It appears only when nothing scrolls, so a busy map is untouched. The wheel now stops at the end of the map instead of scrolling into the void.

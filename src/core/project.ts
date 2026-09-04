@@ -380,6 +380,15 @@ export interface Edge { from: string; to: string; kind: 'talk' | 'context' | 'as
 export interface View { project: Project; nodes: Node[]; edges: Edge[]; moments?: Moment[] }   // moments = a história recente, quando cabe na tela
 
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+/** Cache do parse por tamanho: o estado do browser relia o transcript inteiro a cada atualização. */
+const parsed = new Map<string, { size: number; evs: Ev[] }>();
+async function evsOf(path: string, size: number): Promise<Ev[]> {
+  const hit = parsed.get(path);
+  if (hit && hit.size === size) return hit.evs;
+  const evs = await parseSession(path);
+  parsed.set(path, { size, evs });
+  return evs;
+}
 
 export async function view(p: Project): Promise<View> {
   const [g, sessions, docs] = await Promise.all([loadGraph(p.id), listSessions(80), store.list()]);
@@ -438,7 +447,7 @@ export async function view(p: Project): Promise<View> {
     const st: BrowserState = { url: '', title: '', snapshot: '', console: '', busy: false };
     const linked = g.links.filter((l) => l.from === it.id || l.to === it.id).map((l) => (l.from === it.id ? l.to : l.from));
     for (const a of nodes.filter((n): n is AgentNode => n.kind === 'agent' && linked.includes(n.id) && !!n.session)) {
-      const evs = await parseSession(a.session!.path);
+      const evs = await evsOf(a.session!.path, a.session!.bytes);
       Object.assign(st, browserStateFrom(evs, st));
     }
     if (await settleBrowser(it)) await saveGraph(p.id, g);
