@@ -8,6 +8,7 @@
  * enumera e converte toda representação (AVIF, 8BPS, JP2); por aqui é 0,4 s.
  */
 import { mkdir, stat, unlink } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT } from './store.ts';
 
@@ -74,22 +75,51 @@ export async function pasteImage(dir = PASTES()): Promise<Pasted | null> {
 }
 
 const IMG = /\.(png|jpe?g|gif|webp|bmp|tiff?)$/i;
+export interface Dropped { path: string; dir: boolean; image: boolean }
+
 /**
- * Caminhos de imagem dentro de um texto colado. É por aqui que o Cmd+V serve
- * para alguma coisa: com um arquivo copiado no Finder, o terminal cola o
- * caminho, e o caminho vira a imagem.
+ * Separa uma colagem em palavras como o shell faria: espaço separa, aspas
+ * agrupam, contrabarra escapa. É esse o formato que o terminal produz quando
+ * você arrasta arquivos para dentro dele.
  */
-export async function imagePaths(text: string): Promise<string[]> {
-  const lines = text.split(/[\r\n]+/).map((l) => l.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
-  if (!lines.length || lines.length > 8) return [];
+export function shellWords(text: string): string[] {
   const out: string[] = [];
-  for (const raw of lines) {
-    const p = raw.startsWith('file://') ? decodeURIComponent(raw.slice(7)) : raw;
-    if (!p.startsWith('/') || !IMG.test(p)) return [];   // um só que não seja imagem e a colagem é texto
-    if (!(await stat(p).then((s) => s.isFile(), () => false))) return [];
-    out.push(p);
+  let cur = '', quote = '', has = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    if (c === '\\' && quote !== "'" && i + 1 < text.length) { cur += text[++i]; has = true; continue; }
+    if (!quote && (c === '"' || c === "'")) { quote = c; has = true; continue; }
+    if (quote && c === quote) { quote = ''; continue; }
+    if (!quote && /[\s]/.test(c)) { if (has || cur) { out.push(cur); cur = ''; has = false; } continue; }
+    cur += c; has = true;
+  }
+  if (has || cur) out.push(cur);
+  return out.filter(Boolean);
+}
+
+/**
+ * O que foi arrastado para o terminal: caminhos que existem de verdade.
+ * Vazio quando qualquer pedaço não for um caminho — aí a colagem é texto.
+ */
+export async function droppedPaths(text: string): Promise<Dropped[]> {
+  const words = shellWords(text.trim());
+  if (!words.length || words.length > 12) return [];
+  const out: Dropped[] = [];
+  for (const w of words) {
+    const p = w.startsWith('file://') ? decodeURIComponent(w.slice(7)) : w;
+    if (!p.startsWith('/') && !p.startsWith('~')) return [];
+    const abs = p.replace(/^~(?=\/|$)/, homedir());
+    const st = await stat(abs).catch(() => null);
+    if (!st) return [];
+    out.push({ path: abs, dir: st.isDirectory(), image: st.isFile() && IMG.test(abs) });
   }
   return out;
+}
+
+/** Só as imagens de uma colagem — o caminho curto para o Cmd+V de um arquivo copiado. */
+export async function imagePaths(text: string): Promise<string[]> {
+  const drop = await droppedPaths(text);
+  return drop.length && drop.every((d) => d.image) ? drop.map((d) => d.path) : [];
 }
 
 /** Um arquivo de imagem que já está no disco vira anexo, copiado para a pasta de colagens. */

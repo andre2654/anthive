@@ -228,7 +228,7 @@ function itemBox(g: Grid, n: Node, r: Rect, on: boolean, src: boolean) {
     g.put(r.x + 2, r.y + 2, pad(`${what}  ${G.h}  ${t('{0} lines', n.lines ?? 0)}`, inner), C.dim);
   } else if (n.kind === 'file') {
     const dir = n.item.path.slice(0, -n.item.label.length).replace(home, '~');
-    const lab = `▤ ${n.item.label}`;
+    const lab = `${n.item.dir ? '▦' : '▤'} ${n.item.label}${n.item.dir ? '/' : ''}`;
     g.put(r.x + 2, r.y + 1, pad(lab, inner), n.exists ? C.ink : C.dead);
     const rest = inner - [...lab].length - 2;
     if (rest > 6) g.put(r.x + 2 + [...lab].length + 2, r.y + 1, fit(n.exists ? dir : t('gone'), rest), C.frame);

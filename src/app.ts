@@ -15,14 +15,14 @@ import { modeLabel } from './views/item.ts';
 import { renderAgent, rows, Row, INPUT_H, LinkChip, detailWidth, tasksFrom, PanelData, panelFits, inputLayout, SubChip, renderPlain, TREE_TOP, proseWidth, PROSE_MAX, thumbBoxes } from './views/agent.ts';
 import * as P from './core/project.ts';
 import * as A from './core/approvals.ts';
-import { Pasted, pasteImage, attachFile, imagePaths, clipboardTypes, hasImage, readB64 } from './core/clip.ts';
+import { Pasted, pasteImage, attachFile, droppedPaths, clipboardTypes, hasImage, readB64 } from './core/clip.ts';
 import * as store from './core/store.ts';
 import { ROOT } from './core/store.ts';
 import * as bus from './core/bus.ts';
 import * as svc from './core/services.ts';
 import { Session, Ev, parseSession, summarize, windowOf } from './core/sessions.ts';
 import { ChatSession, ChatEvent, MODELS, EFFORTS, PERMISSIONS, DEEP_EFFORT, deepPrompt } from './core/chat.ts';
-import { readFile, writeFile, unlink, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, unlink, mkdir, readdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { t } from './i18n.ts';
 
@@ -203,7 +203,7 @@ export class App {
     const n = this.node(this.sel); if (!n) return;
     if (n.kind === 'agent') return this.openAgent(n);
     if (n.kind === 'note') { this.note = n.doc; this.noteScroll = 0; this.view = 'note'; }
-    if (n.kind === 'file') { this.file = n.item; this.fileScroll = 0; this.fileLines = await readFile(n.item.path, 'utf8').then((t) => t.split('\n')).catch(() => null); this.view = 'file'; }
+    if (n.kind === 'file') { this.file = n.item; this.fileScroll = 0; this.fileLines = await this.linesOf(n.item); this.view = 'file'; }
     if (n.kind === 'service') { this.service = n.item; this.svcStats = await svc.stats(n.item.pid); this.view = 'service'; }
     if (n.kind === 'task') { this.task = n; this.view = 'task'; }
     if (n.kind === 'wrote') {
@@ -456,6 +456,14 @@ export class App {
     if (toBottom) { this.aScroll = max; this.aCursor = -1; } else this.aScroll = Math.min(this.aScroll, max);
     this.dirty = true;
   }
+  /** O conteúdo de um item de arquivo: as linhas do texto, ou a listagem quando é pasta. */
+  private async linesOf(it: P.FileItem): Promise<string[] | null> {
+    if (!it.dir) return readFile(it.path, 'utf8').then((t) => t.split('\n')).catch(() => null);
+    const names = await readdir(it.path, { withFileTypes: true }).catch(() => null);
+    if (!names) return null;
+    return names.filter((e) => !e.name.startsWith('.')).sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))
+      .map((e) => (e.isDirectory() ? `${e.name}/` : e.name));
+  }
   private async loadTranscript(s: Session) { this.evs = await parseSession(s.path); this.lastLoadedPath = s.path; this.expanded = new Set(); this.rebuild(true); }
   async openAgent(n: P.AgentNode) {
     this.agent = n; this.view = 'agent'; this.composing = false;
@@ -571,17 +579,41 @@ export class App {
    */
   async onPaste(text: string) {
     if (this.view === 'browser' && this.typing) { this.page?.text(text); return; }
+    const drop = this.view === 'agent' || this.view === 'project' ? await droppedPaths(text).catch(() => []) : [];
+    if (drop.length) return this.onDrop(drop);
     if (this.view !== 'agent' || !this.composing) return;
-    const paths = await imagePaths(text).catch(() => []);
-    if (paths.length) {
-      for (const p of paths.slice(0, 4 - this.pastes.length)) {
-        const img = await attachFile(p).catch(() => null);
-        if (img) this.pastes.push({ ...img, data: await readB64(img.path) });
-      }
-      this.say(t('{0} image{1} attached from the paste', this.pastes.length, this.pastes.length > 1 ? 's' : ''), 4000);
-    } else {
-      this.chatInput.insert(text.replace(/\r\n?/g, '\n'));
+    this.chatInput.insert(text.replace(/\r\n?/g, '\n'));
+    this.dirty = true;
+  }
+
+  /**
+   * Arquivos e pastas arrastados para dentro do terminal. Imagem vira anexo do
+   * turno; o resto entra no projeto e se liga ao agente, que é como se dá um
+   * arquivo a ele.
+   */
+  private async onDrop(drop: { path: string; dir: boolean; image: boolean }[]) {
+    if (!this.project) return;
+    const pid = this.project.id;
+    const pics = this.composing && this.view === 'agent' ? drop.filter((d) => d.image) : [];
+    for (const d of pics.slice(0, 4 - this.pastes.length)) {
+      const img = await attachFile(d.path).catch(() => null);
+      if (img) this.pastes.push({ ...img, data: await readB64(img.path) });
     }
+    const rest = drop.filter((d) => !pics.includes(d));
+    const agent = this.view === 'agent' ? this.agent : (() => { const n = this.node(this.sel); return n?.kind === 'agent' ? n : null; })();
+    const linked: string[] = [];
+    for (const d of rest) {
+      const it = await P.addFile(pid, d.path).catch(() => null);
+      if (!it) continue;
+      if (agent) await P.link(pid, agent.id, it.id).catch(() => {});
+      linked.push(it.label);
+    }
+    await this.load();
+    const said = [
+      pics.length ? t('{0} image{1} attached', pics.length, pics.length > 1 ? 's' : '') : '',
+      linked.length ? (agent ? t('{0} linked to {1}', linked.join(', '), agent.name) : t('{0} added to the project', linked.join(', '))) : '',
+    ].filter(Boolean).join('  ─  ');
+    if (said) this.say(said, 6000);
     this.dirty = true;
   }
 

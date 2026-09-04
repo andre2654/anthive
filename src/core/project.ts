@@ -8,7 +8,7 @@
  * Sessões do Claude Code no diretório viram agentes sozinhas — o mapa nasce
  * cheio sem você registrar nada.
  */
-import { readFile, writeFile, mkdir, access, realpath } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, access, stat, realpath } from 'node:fs/promises';
 import { join, basename, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { ROOT, ensure, slugify } from './store.ts';
@@ -27,7 +27,7 @@ export interface Project { id: string; name: string; cwd: string; created: numbe
 
 export type ItemKind = 'agent' | 'note' | 'file' | 'service';
 export interface AgentItem { kind: 'agent'; id: string; name: string; cwd: string; sessionId: string | null; worktree: string | null; created: number }
-export interface FileItem { kind: 'file'; id: string; path: string; label: string; created: number; context?: 'claude' | 'memory' }
+export interface FileItem { kind: 'file'; id: string; path: string; label: string; created: number; context?: 'claude' | 'memory'; dir?: boolean }
 export interface ServiceItem { kind: 'service'; id: string; name: string; pid: number; port: number | null; command: string; cwd: string; created: number }
 /** O Chrome do projeto: modo (oculto = headless; janela = na tela, sem roubar o foco), porta de depuração fixa, perfil próprio. */
 export interface BrowserItem { kind: 'browser'; id: string; name: string; mode: BrowserMode; port: number; headless?: boolean; created: number }
@@ -134,8 +134,8 @@ export async function addFile(pid: string, path: string): Promise<FileItem> {
   const abs = resolve(path.replace(/^~(?=\/|$)/, homedir()));
   const found = g.items.find((i): i is FileItem => i.kind === 'file' && i.path === abs);
   if (found) return found;
-  await access(abs);   // tem que existir
-  const it: FileItem = { kind: 'file', id: `f-${uid()}`, path: abs, label: basename(abs), created: Date.now() };
+  const st = await stat(abs);   // tem que existir
+  const it: FileItem = { kind: 'file', id: `f-${uid()}`, path: abs, label: basename(abs), created: Date.now(), ...(st.isDirectory() ? { dir: true } : {}) };
   g.items.push(it); await saveGraph(pid, g); return it;
 }
 

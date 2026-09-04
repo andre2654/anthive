@@ -67,5 +67,37 @@ inp.handle({ k: 'left' } as any);
 inp.insert('XY');
 must('a colagem entra no cursor', inp.value === 'aXYb');
 
+// --- arrastar arquivos e pastas ---
+const { shellWords, droppedPaths } = await import('../src/core/clip.ts');
+must('caminho com espaço escapado é uma palavra só', JSON.stringify(shellWords('/tmp/um\\ dois.png /tmp/tres.png')) === JSON.stringify(['/tmp/um dois.png', '/tmp/tres.png']));
+must('aspas simples e duplas também agrupam', JSON.stringify(shellWords(`'/tmp/a b.md' "/tmp/c d.md"`)) === JSON.stringify(['/tmp/a b.md', '/tmp/c d.md']));
+const here = process.cwd();
+const dropped = await droppedPaths(`${here}/docs/map.png ${here}/README.md ${here}/docs`);
+must('arrastar imagem, documento e pasta de uma vez', dropped.length === 3 && dropped[0]!.image && !dropped[1]!.image && dropped[2]!.dir);
+must('uma frase não é arrastar', (await droppedPaths('olha isto aqui')).length === 0);
+must('caminho que não existe não é arrastar', (await droppedPaths('/tmp/nada-aqui-mesmo.md')).length === 0);
+
+// --- o que cai no chat: imagem anexa, arquivo e pasta ligam ao agente ---
+const { App } = await import('../src/app.ts');
+const { Screen: Sc } = await import('../src/tui/screen.ts');
+const P2 = await import('../src/core/project.ts');
+class F2 extends Sc { constructor() { super({ mouse: true }); this.W = 120; this.H = 28; } override measure() {} override enter() {} override restore() {} override write() {} override onKey() {} }
+const repo = await mkdtemp(join(tmpdir(), 'anthive-drop-'));
+const proj = await P2.createProject('queda', repo);
+const ag = await P2.addAgent(proj, 'api');
+const app = new App(new F2()); app.consentOk = true;
+await app.openProject(proj);
+app.view = 'agent'; app.agent = app.pv!.nodes.find((n) => n.kind === 'agent') as any; app.composing = true;
+await (app as any).onPaste(`${here}/docs/map.png ${here}/README.md ${here}/docs`);
+must('a imagem virou anexo do turno', app.pastes.length === 1 && app.pastes[0]!.bytes > 1000);
+const g2 = await P2.loadGraph(proj.id);
+const files = g2.items.filter((i) => i.kind === 'file') as any[];
+must('o documento e a pasta viraram itens do projeto', files.length === 2 && files.some((f) => f.label === 'README.md') && files.some((f) => f.label === 'docs' && f.dir));
+must('e ficaram ligados ao agente', g2.links.filter((l) => l.from === ag.id || l.to === ag.id).length === 2);
+must('o aviso conta o que aconteceu', /attached/.test(app.status) && /linked to api/.test(app.status));
+const dirItem = files.find((f) => f.dir)!;
+must('abrir a pasta lista o conteúdo', ((await (app as any).linesOf(dirItem)) ?? []).some((l: string) => l.includes('map.png')));
+must('texto comum continua indo para o campo', (await (app as any).onPaste('só uma frase'), app.chatInput.value.includes('só uma frase')));
+
 console.log(fails ? `\n${fails} failure(s)` : '\nall green');
 process.exit(fails ? 1 : 0);
