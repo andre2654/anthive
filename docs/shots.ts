@@ -69,7 +69,7 @@ if (br && (await isUp(br.item.port))) {
 }
 
 // grid → html
-const hex = (c: readonly [number, number, number]) => '#' + c.map((v) => v.toString(16).padStart(2, '0')).join('');
+const hex = (c: readonly number[]) => '#' + c.slice(0, 3).map((v) => v.toString(16).padStart(2, '0')).join('');   // o 4º valor é o bit de negrito, não alfa
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 function toHtml(s: (typeof shots)[0]): string {
   const cells: string[] = [];
