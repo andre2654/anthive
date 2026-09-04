@@ -117,11 +117,11 @@ export class App {
   /** O quanto o mapa pode rolar: sem isso a roda leva a tela para o vazio. */
   private mapMax(): number {
     if (this.view !== 'project' || !this.pv) return 0;
-    return Math.max(0, layoutProject(this.pv, this.grid.W, 0, this.showPanel).height - (this.grid.H - 5));
+    return Math.max(0, layoutProject(this.pv, this.grid.W, 0, this.showPanel, this.grid.H).height - (this.grid.H - 5));
   }
   private rectsOnScreen(): { key: string; x: number; y: number }[] {
     if (this.view === 'home') return layoutHome(this.cards.length, this.grid.W, this.homeScroll).rects.map((r) => ({ key: r.key, x: r.rect.x + r.rect.w / 2, y: r.rect.y + r.rect.h / 2 }));
-    if (this.view === 'project' && this.pv) return layoutProject(this.pv, this.grid.W, this.pScroll, this.showPanel).boxes.map((b) => ({ key: b.id, x: b.rect.x + b.rect.w / 2, y: b.rect.y + b.rect.h / 2 }));
+    if (this.view === 'project' && this.pv) return layoutProject(this.pv, this.grid.W, this.pScroll, this.showPanel, this.grid.H).boxes.map((b) => ({ key: b.id, x: b.rect.x + b.rect.w / 2, y: b.rect.y + b.rect.h / 2 }));
     return [];
   }
   private get selKey() { return this.view === 'home' ? this.homeSel : this.sel; }
@@ -156,7 +156,7 @@ export class App {
       if (r.y < top) this.homeScroll -= top - r.y; else if (r.y + r.h - 1 > bottom) this.homeScroll += r.y + r.h - 1 - bottom;
       this.homeScroll = Math.max(0, this.homeScroll);
     } else if (this.view === 'project' && this.pv) {
-      const r = layoutProject(this.pv, this.grid.W, this.pScroll, this.showPanel).boxes.find((b) => b.id === this.sel)?.rect; if (!r) return;
+      const r = layoutProject(this.pv, this.grid.W, this.pScroll, this.showPanel, this.grid.H).boxes.find((b) => b.id === this.sel)?.rect; if (!r) return;
       if (r.y < top) this.pScroll -= top - r.y; else if (r.y + r.h - 1 > bottom) this.pScroll += r.y + r.h - 1 - bottom;
       this.pScroll = Math.max(0, this.pScroll);
     }

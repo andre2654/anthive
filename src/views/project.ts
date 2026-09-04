@@ -20,6 +20,25 @@ import { gauge } from '../tui/theme.ts';
 import { keybar, scrollHint } from './chrome.ts';
 
 export const AGENT_H = 5, NOTE_H = 4, FILE_H = 3, SERVICE_H = 4;
+const AGENT_TALL = 7;   // com poucos agentes a caixa ganha as últimas ferramentas e as tarefas
+/** A altura da caixa de agente: cresce quando há poucos agentes e a tela comporta. */
+export function agentH(v: View, H: number): number {
+  const agents = v.nodes.filter((n) => n.kind === 'agent').length;
+  if (!agents || agents > 3) return AGENT_H;
+  const subs = v.nodes.filter((n) => n.kind === 'sub').length;
+  return agents * (AGENT_TALL + 1) + subs * 3 <= H - 8 ? AGENT_TALL : AGENT_H;
+}
+/** A largura da coluna dos agentes: o suficiente para a frase do que eles estão fazendo. */
+function agentW(v: View, room: number): number {
+  let want = 34;   // o piso antigo: a caixa cresce a partir dele, nunca abaixo
+  for (const n of v.nodes) {
+    if (n.kind !== 'agent') continue;
+    const doing = n.session?.lastText.replace(/^(\w+ )?cd \S+\s*(&&\s*)?/, '$1') ?? '';
+    want = Math.max(want, [...n.name].length + 8, Math.min(60, [...doing].length + 5));
+    for (const r of v.nodes) if (r.kind === 'sub' && r.agent === n.id) want = Math.max(want, Math.min(60, [...r.sub.name].length + 9));
+  }
+  return Math.max(24, Math.min(60, want, room));
+}
 const LANE_STEP = 3;                     // faixas em +2, +5, +8, … ; a última coluna da calha fica para a seta
 const MIN_GUTTER = 12;
 
@@ -54,18 +73,19 @@ function assignLanes(spans: { key: string; y0: number; y1: number }[]): { lanes:
   return { lanes, count: Math.max(1, used.length) };
 }
 
-export function layoutProject(v: View, W: number, scroll = 0, panel = false): ProjectLayout {
+export function layoutProject(v: View, W: number, scroll = 0, panel = false, H = 40): ProjectLayout {
   const pw = panel && panelFits(W) ? PANEL_W : 0;
   const avail = W - 4 - pw;
   const agents = v.nodes.filter((n): n is AgentNode => n.kind === 'agent');
   const items = (['note', 'task', 'browser', 'wrote', 'file', 'service'] as const).flatMap((kind) => v.nodes.filter((x) => x.kind === kind));
-  const hOf = (n: Node) => n.kind === 'agent' ? AGENT_H : n.kind === 'note' ? NOTE_H : n.kind === 'file' ? (n.item.context ? NOTE_H : FILE_H) : n.kind === 'task' ? TASK_H : n.kind === 'sub' ? SUB_H : n.kind === 'wrote' ? WROTE_H : n.kind === 'browser' ? BROWSER_H : SERVICE_H;
+  const aH = agentH(v, H);
+  const hOf = (n: Node) => n.kind === 'agent' ? aH : n.kind === 'note' ? NOTE_H : n.kind === 'file' ? (n.item.context ? NOTE_H : FILE_H) : n.kind === 'task' ? TASK_H : n.kind === 'sub' ? SUB_H : n.kind === 'wrote' ? WROTE_H : n.kind === 'browser' ? BROWSER_H : SERVICE_H;
 
   // 1) alturas primeiro: não dependem da largura da calha
   const yOf = new Map<string, number>();
   let y = 2 - scroll;
   const subsOf = (id: string) => v.nodes.filter((n): n is SubNode => n.kind === 'sub' && n.agent === id);
-  for (const a of agents) { yOf.set(a.id, y); y += AGENT_H; for (const s of subsOf(a.id)) { yOf.set(s.id, y); y += SUB_H; } y += 1; }
+  for (const a of agents) { yOf.set(a.id, y); y += aH; for (const s of subsOf(a.id)) { yOf.set(s.id, y); y += SUB_H; } y += 1; }
   const leftBottom = y;
   y = 2 - scroll;
   for (const n of items) { yOf.set(n.id, y); y += hOf(n) + 1; }
@@ -97,11 +117,11 @@ export function layoutProject(v: View, W: number, scroll = 0, panel = false): Pr
   const gutter = Math.min(Math.max(MIN_GUTTER, 2 + count * LANE_STEP + 2), Math.max(MIN_GUTTER, Math.floor(avail / 3)));   // muitas faixas não podem zerar a coluna da direita
 
   // 3) agora as larguras e as caixas
-  const leftW = Math.min(34, Math.max(24, Math.floor((avail - gutter) / 2)));
+  const leftW = agentW(v, Math.max(24, Math.floor((avail - gutter) / 2)));
   const rightX = 2 + leftW + gutter;
   const rightW = W - 2 - rightX - pw;
   const boxes: ProjectLayout['boxes'] = [];
-  for (const a of agents) boxes.push({ id: a.id, rect: { x: 2, y: yOf.get(a.id)!, w: leftW, h: AGENT_H }, node: a });
+  for (const a of agents) boxes.push({ id: a.id, rect: { x: 2, y: yOf.get(a.id)!, w: leftW, h: aH }, node: a });
   for (const a of agents) for (const s of subsOf(a.id)) boxes.push({ id: s.id, rect: { x: 2 + SUB_INDENT, y: yOf.get(s.id)!, w: leftW - SUB_INDENT, h: SUB_H }, node: s });
   for (const n of items) boxes.push({ id: n.id, rect: { x: rightX, y: yOf.get(n.id)!, w: rightW, h: hOf(n) }, node: n });
 
@@ -137,7 +157,7 @@ export function layoutProject(v: View, W: number, scroll = 0, panel = false): Pr
 }
 
 // ---------------------------------------------------------------- caixas
-function agentBox(g: Grid, n: AgentNode, r: Rect, on: boolean, src: boolean) {
+function agentBox(g: Grid, n: AgentNode, r: Rect, on: boolean, src: boolean, tasks: TaskNode[] = []) {
   const s = n.session, inner = r.w - 4;
   const state: State = s ? s.state : 'idle';
   if (on || src) g.fill(r, BG.sel);
@@ -150,10 +170,19 @@ function agentBox(g: Grid, n: AgentNode, r: Rect, on: boolean, src: boolean) {
   const inflight = s?.state === 'running' && s.pendingTool ? `${G.tool} ${s.pendingTool}${s.pendingInput ? ' ' + s.pendingInput : ''}` : '';
   const l2 = s?.state === 'waiting' || s?.state === 'stuck' ? `${G.pause} ${s.pendingTool ?? '?'}` : inflight || branch || doing || (n.item ? t('no session — ↵ opens the chat') : '');
   g.put(r.x + 2, r.y + 2, pad(l2, inner), s?.state === 'waiting' ? C.hold : inflight ? C.dim : branch ? C.link : C.frame);
-  const ctx = s?.context ? `${tok(s.context)}` : '';
-  const sw = Math.max(4, inner - (ctx ? ctx.length + 2 : 0));
-  g.put(r.x + 2, r.y + 3, sparkline(s?.spark ?? [], sw), SPARK[state]);
-  if (ctx) g.put(r.x + 2 + sw, r.y + 3, padStart(ctx, ctx.length + 2), (s!.context / windowOf(s!.model, s!.context)) > 0.85 ? C.hold : C.frame);
+  if (r.h >= 7) {
+    const recent = (s?.recent ?? []).slice(-3).map((x) => x.split(' ')[0]).join(' · ');
+    g.put(r.x + 2, r.y + 3, pad(recent ? `${G.tool} ${recent}` : '', inner), C.frame);
+    const open = tasks.filter((t) => t.task.status !== 'completed'), doing = open.find((t) => t.task.status === 'in_progress');
+    const line = doing ? `${G.focus} ${doing.task.active || doing.task.subject}` : open.length ? t('{0} tasks open', open.length) : tasks.length ? t('all tasks done') : '';
+    g.put(r.x + 2, r.y + 4, pad(line, inner), doing ? C.hold : C.frame);
+  }
+  const gy = r.y + r.h - 2;
+  const win = s ? windowOf(s.model, s.context) : 0;
+  const ctx = s?.context ? `${gauge(s.context / win, 6)} ${Math.round((100 * s.context) / win)}%` : '';
+  const sw = Math.max(4, inner - (ctx ? [...ctx].length + 2 : 0));
+  g.put(r.x + 2, gy, sparkline(s?.spark ?? [], sw), SPARK[state]);
+  if (ctx) g.put(r.x + 2 + sw, gy, padStart(ctx, [...ctx].length + 2), s!.context / win > 0.85 ? C.hold : C.frame);
   g.hit(n.id, r);
 }
 
@@ -344,7 +373,7 @@ function drawNodePanel(g: Grid, v: View, n: Node, top: number, bottom: number) {
 export function renderProject(g: Grid, v: View, selected: string | null, scroll: number, status: string, opts: ProjectOpts = {}) {
   const { W, H } = g;
   const top = 1, bottom = H - 4;
-  const L = layoutProject(v, W, scroll, !!opts.panel);
+  const L = layoutProject(v, W, scroll, !!opts.panel, H);
   const src = opts.linkSource ?? null;
   const home = process.env.HOME ?? '';
 
@@ -365,7 +394,7 @@ export function renderProject(g: Grid, v: View, selected: string | null, scroll:
   }
   for (const b of L.boxes) {
     if (!vis(b.rect)) continue;
-    if (b.node.kind === 'agent') agentBox(g, b.node, b.rect, b.id === selected, b.id === src);
+    if (b.node.kind === 'agent') agentBox(g, b.node, b.rect, b.id === selected, b.id === src, v.nodes.filter((m): m is TaskNode => m.kind === 'task' && m.agent === b.node.id));
     else if (b.node.kind === 'sub') subBox(g, b.node, b.rect, b.id === selected, b.id === src);
     else itemBox(g, b.node, b.rect, b.id === selected, b.id === src);
   }

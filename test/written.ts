@@ -123,6 +123,21 @@ renderProject(gs, app.pv!, null, 0, '', {});
 must('com a tela cheia a faixa some sozinha', !gs.toString().includes('history ─'));
 must('a roda não passa do fim do mapa', (app as any).mapMax() >= 0);
 
+// --- a caixa cresce com o conteúdo e com a tela ---
+const { layoutProject, agentH } = await import('../src/views/project.ts');
+const wide = layoutProject(app.pv!, 200, 0, false, 40);
+const narrow = layoutProject(app.pv!, 90, 0, false, 40);
+const wa = wide.boxes.find((b) => b.node.kind === 'agent')!, na = narrow.boxes.find((b) => b.node.kind === 'agent')!;
+must('com frase curta a caixa fica no tamanho de sempre', wa.rect.w === 34);
+must('numa tela estreita ela não estoura o espaço', na.rect.w <= 34 && na.rect.w >= 24);
+const longView = { ...app.pv!, nodes: app.pv!.nodes.map((n) => n.kind === 'agent' && n.session ? { ...n, session: { ...n.session, lastText: 'uma frase bem comprida sobre o que ele está fazendo agora mesmo' } } : n) };
+const grown = layoutProject(longView, 220, 0, false, 40).boxes.find((b) => b.node.kind === 'agent')!;
+must('com frase longa ela cresce, com teto de 60', grown.rect.w === 60);
+const tight = layoutProject(longView, 90, 0, false, 40).boxes.find((b) => b.node.kind === 'agent')!;
+must('mas nunca além da metade do espaço disponível', tight.rect.w < grown.rect.w && tight.rect.w <= Math.floor((90 - 4 - 12) / 2));
+must('com poucos agentes a caixa ganha duas linhas', agentH(app.pv!, 40) === 7 && wa.rect.h === 7);
+must('numa tela baixa ela volta ao tamanho de sempre', agentH(app.pv!, 14) === 5);
+
 await rm(claude, { recursive: true, force: true });
 console.log(fails ? `\n${fails} failure(s)` : '\nall green');
 process.exit(fails ? 1 : 0);

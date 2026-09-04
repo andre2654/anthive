@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Agent boxes grow with the screen instead of stopping at 34 columns: wide enough for the whole sentence of what the agent is doing, up to 60, and with three or fewer agents they gain two rows for the last tools and the open tasks. The context reads as a gauge with a percentage, the same measure the panel shows.
 - A history strip fills the empty part of the map: the last turns, the subagents that ran and the files that were written, oldest first, with the hour and who did it. It appears only when nothing scrolls, so a busy map is untouched. The wheel now stops at the end of the map instead of scrolling into the void.
 - The map shows the work, not only what you registered: the files an agent produced hang off it as nodes, grouped by folder past five, with the folder, the count and who made them. They come from three sources, the write tools, shell redirection (`cat > file`, `tee`, `sed -i`), which is how most real writing happens, and the filesystem for what no tool call names, like a spreadsheet a script wrote. Shell targets only count when the file exists, which turns 61 candidate paths into the 4 real ones on the author's project. `↵` opens the file, `l` pins it to the project as a real file item, `d` refuses. `project_map` lists them.
 
