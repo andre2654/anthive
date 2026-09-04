@@ -1,10 +1,11 @@
-import { C, G, RGB, fg, bgAnsi, RESET, isNarrow, pad, fit } from './theme.ts';
+import { C, G, RGB, fg, bgAnsi, RESET, BOLD, NOBOLD, isNarrow, pad, fit } from './theme.ts';
 
 export interface Rect { x: number; y: number; w: number; h: number }
 export interface Hit extends Rect { key: string }
 
-const packed = (c: RGB) => (c[0] << 16) | (c[1] << 8) | c[2];
-const unpack = (n: number): RGB => [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+const BOLD_BIT = 1 << 24;
+const packed = (c: RGB) => (c[0] << 16) | (c[1] << 8) | c[2] | (c[3] ? BOLD_BIT : 0);
+const unpack = (n: number): RGB => (n & BOLD_BIT ? [(n >> 16) & 255, (n >> 8) & 255, n & 255, 1] : [(n >> 16) & 255, (n >> 8) & 255, n & 255]);
 
 /**
  * Grade de caracteres. Uma célula = um caractere + uma cor.
@@ -132,7 +133,7 @@ export class Grid {
   /** Emite só o que mudou desde o frame anterior. */
   diff(prev: Grid | null): string {
     const out: string[] = [];
-    let lastColor = -1, lastBg = -2;
+    let lastColor = -1, lastBg = -2, lastBold = false;
     let at = -1;
     const same = prev && prev.W === this.W && prev.H === this.H;
     for (let y = 0; y < this.H; y++) {
@@ -144,7 +145,11 @@ export class Grid {
           lastBg = this.bgc[i]!;
           out.push(lastBg < 0 ? '\x1b[49m' : bgAnsi(unpack(lastBg)));
         }
-        if (this.co[i] !== lastColor) { out.push(fg(unpack(this.co[i]!))); lastColor = this.co[i]!; }
+        if (this.co[i] !== lastColor) {
+          const v = this.co[i]!, b = !!(v & BOLD_BIT);
+          if (b !== lastBold) { out.push(b ? BOLD : NOBOLD); lastBold = b; }
+          out.push(fg(unpack(v))); lastColor = v;
+        }
         out.push(this.ch[i]!);
         at = i + 1;
       }

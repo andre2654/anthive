@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Real weight, not just colour: the grid carries a bold bit, so headings, `**emphasis**` and the names of who is speaking are actually bold. Each of your turns gets a blank line before it.
 - The chat reads like text again on a wide screen. Prose wraps at 92 characters instead of stretching to 148, the hour and the token count follow the text instead of floating at the far edge, code and quote blocks are legible rather than grey, and the side panel grows with the terminal so it stops cutting its own values.
 
 - The map refresh went from about 150 ms to 5 ms: session summaries are cached by size and modification time, with age and state still recomputed every tick, the transcript parse behind the browser state is cached the same way, and a slow refresh can no longer stack on the next one.

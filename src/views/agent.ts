@@ -6,7 +6,7 @@
 import { Grid } from '../tui/grid.ts';
 import { browserTool, AgentNode } from '../core/project.ts';
 import { browserShort } from './item.ts';
-import { C, G, RGB, BG, gauge, sparkline, ago, tok, fit, pad, padStart } from '../tui/theme.ts';
+import { C, G, RGB, BG, gauge, sparkline, ago, tok, fit, pad, padStart, strong } from '../tui/theme.ts';
 import { Ev, Session, windowOf } from '../core/sessions.ts';
 import { keybar, scrollHint } from './chrome.ts';
 import { renderMd, Span } from '../tui/markdown.ts';

@@ -8,7 +8,7 @@
  * linha inteira à direita. `assertNarrow` derruba isso em dev.
  */
 
-export type RGB = readonly [number, number, number];
+export type RGB = readonly [number, number, number] | readonly [number, number, number, 1];
 
 export const C = {
   frame:  [0x39, 0x42, 0x4f],
@@ -102,6 +102,9 @@ export function padStart(s: string, w: number): string {
 
 export const fg = (c: RGB) => `\x1b[38;2;${c[0]};${c[1]};${c[2]}m`;
 export const RESET = '\x1b[0m';
+export const NOBOLD = '\x1b[22m';
+/** A mesma cor, com peso. A grade carrega o negrito num bit da cor empacotada. */
+export const strong = (c: RGB): RGB => [c[0], c[1], c[2], 1];
 export const BOLD = '\x1b[1m';
 
 /** Sparkline braille. Escala pelo pico da própria série. */

@@ -3,7 +3,7 @@
  * inline e links viram linhas de trechos coloridos, já quebradas na largura.
  * Não há negrito de verdade na grade (só cor), então ênfase é cor mais clara.
  */
-import { C, G, RGB } from './theme.ts';
+import { C, G, RGB, strong } from './theme.ts';
 
 export interface Span { text: string; color: RGB }
 export type MdKind = 'h' | 'p' | 'li' | 'code' | 'quote' | 'blank' | 'hr' | 'table';
@@ -20,7 +20,7 @@ function inline(text: string, base: RGB): Ch[] {
   while ((m = re.exec(text))) {
     push(text.slice(i, m.index), base);
     if (m[1]) push(m[1].slice(1, -1), C.link);
-    else if (m[2]) push(m[2].slice(2, -2), C.inkHi);
+    else if (m[2]) push(m[2].slice(2, -2), strong(C.inkHi));   // **negrito** vira peso, não só cor
     else if (m[3]) push(m[3].slice(1, m[3].indexOf(']')), C.link);
     i = m.index + m[0].length;
   }
@@ -135,7 +135,7 @@ export function renderMd(text: string, width: number): MdLine[] {
     if (/^\s*([-*_]\s*){3,}$/.test(raw)) { out.push({ kind: 'hr', spans: [{ text: '─'.repeat(Math.min(w, 40)), color: C.frame }] }); continue; }
     const h = /^(#{1,6})\s+(.*)$/.exec(raw);
     if (h) {
-      const color = h[1]!.length <= 2 ? C.inkHi : C.ink;
+      const color = strong(h[1]!.length <= 2 ? C.inkHi : C.ink);
       for (const l of wrapChs(inline(h[2]!.replace(/\s+#+$/, ''), color), w, [], [])) out.push({ kind: 'h', spans: toSpans(l) });
       continue;
     }

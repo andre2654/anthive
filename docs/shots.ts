@@ -76,7 +76,7 @@ function toHtml(s: (typeof shots)[0]): string {
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const c = s.grid.cell(x, y);
     if (c.ch === ' ' && !c.bg) continue;
-    cells.push(`<i style="left:${(x * CW).toFixed(2)}px;top:${y * CH}px;color:${hex(c.fg)}${c.bg ? `;background:${hex(c.bg)}` : ''}">${esc(c.ch)}</i>`);
+    cells.push(`<i style="left:${(x * CW).toFixed(2)}px;top:${y * CH}px;color:${hex(c.fg)}${c.fg[3] ? ';font-weight:600' : ''}${c.bg ? `;background:${hex(c.bg)}` : ''}">${esc(c.ch)}</i>`);
   }
   const img = s.img ? `<img src="data:image/png;base64,${s.img.data}" style="position:absolute;left:${(s.img.x * CW).toFixed(2)}px;top:${s.img.y * CH}px;width:${(s.img.cols * CW).toFixed(2)}px;height:${s.img.rows * CH}px">` : '';
   return `<!doctype html><html><head><meta charset="utf-8"><style>
