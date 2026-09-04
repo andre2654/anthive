@@ -111,6 +111,18 @@ await (app as any).commitLink();
 const saved = await P.loadGraph(p.id);
 must('l fixa o arquivo no projeto em vez de gravar um id que morre', saved.items.some((i) => i.kind === 'file') && saved.links.every((l) => !l.from.startsWith('wrote-') && !l.to.startsWith('wrote-')));
 
+// --- a faixa de história ---
+const { renderProject } = await import('../src/views/project.ts');
+const { Grid } = await import('../src/tui/grid.ts');
+const gh = new Grid(120, 34);
+renderProject(gh, app.pv!, null, 0, '', {});
+const sh = gh.toString();
+must('a faixa aparece quando sobra tela, com hora, quem e o quê', sh.includes('history ─') && /\d\d:\d\d api/.test(sh) && sh.includes('faça o relatório'));
+const gs = new Grid(120, 14);
+renderProject(gs, app.pv!, null, 0, '', {});
+must('com a tela cheia a faixa some sozinha', !gs.toString().includes('history ─'));
+must('a roda não passa do fim do mapa', (app as any).mapMax() >= 0);
+
 await rm(claude, { recursive: true, force: true });
 console.log(fails ? `\n${fails} failure(s)` : '\nall green');
 process.exit(fails ? 1 : 0);

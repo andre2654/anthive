@@ -16,7 +16,7 @@ import * as store from './store.ts';
 import { Session, Ev, listSessions, sessionById, parseSession, PROJECTS } from './sessions.ts';
 import { Task, tasksOfSession } from './tasks.ts';
 import { Subagent, subagentsOfSession } from './subagents.ts';
-import { Write, How, writesOfSession, changedFiles, relTo, folderOf } from './written.ts';
+import { Write, How, Moment, writesOfSession, changedFiles, historyOf, relTo, folderOf } from './written.ts';
 import { pending } from './approvals.ts';
 import { sessionGone } from './procs.ts';
 import { SYSTEM_PREAMBLE, BROWSER_PREAMBLE } from './chat.ts';
@@ -377,7 +377,7 @@ export interface BrowserNode { kind: 'browser'; id: string; item: BrowserItem; s
 export type Node = AgentNode | NoteNode | FileNode | ServiceNode | TaskNode | SubNode | WroteNode | BrowserNode;
 
 export interface Edge { from: string; to: string; kind: 'talk' | 'context' | 'assoc' | 'task' | 'sub' | 'wrote'; thread?: store.Doc }
-export interface View { project: Project; nodes: Node[]; edges: Edge[] }
+export interface View { project: Project; nodes: Node[]; edges: Edge[]; moments?: Moment[] }   // moments = a história recente, quando cabe na tela
 
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
@@ -519,7 +519,11 @@ export async function view(p: Project): Promise<View> {
   for (const l of g.links) if (ids.has(l.from) && ids.has(l.to)) edges.push({ from: l.from, to: l.to, kind: nodes.find((n) => n.id === l.from)?.kind === 'agent' ? 'context' : 'assoc' });
   // o Claude lê CLAUDE.md e a memória em toda sessão: todo agente está ligado a eles
   for (const f of ctx) for (const a of nodes) if (a.kind === 'agent') edges.push({ from: a.id, to: f.id, kind: 'context' });
-  return { project: p, nodes, edges };
+  // a história recente: os turnos, os subagentes e as escritas, de todos os agentes juntos
+  const live = nodes.filter((n): n is AgentNode => n.kind === 'agent' && !!n.session)
+    .map((a) => ({ name: a.name, path: a.session!.path, size: a.session!.bytes, cwd: [p.cwd, a.cwd] }));
+  const moments = live.length ? await historyOf(live, 40).catch(() => []) : [];
+  return { project: p, nodes, edges, moments };
 }
 
 // ---------------------------------------------------------------- briefing

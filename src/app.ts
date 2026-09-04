@@ -114,6 +114,11 @@ export class App {
   }
 
   // ------------------------------------------------------------ navegação geométrica
+  /** O quanto o mapa pode rolar: sem isso a roda leva a tela para o vazio. */
+  private mapMax(): number {
+    if (this.view !== 'project' || !this.pv) return 0;
+    return Math.max(0, layoutProject(this.pv, this.grid.W, 0, this.showPanel).height - (this.grid.H - 5));
+  }
   private rectsOnScreen(): { key: string; x: number; y: number }[] {
     if (this.view === 'home') return layoutHome(this.cards.length, this.grid.W, this.homeScroll).rects.map((r) => ({ key: r.key, x: r.rect.x + r.rect.w / 2, y: r.rect.y + r.rect.h / 2 }));
     if (this.view === 'project' && this.pv) return layoutProject(this.pv, this.grid.W, this.pScroll, this.showPanel).boxes.map((b) => ({ key: b.id, x: b.rect.x + b.rect.w / 2, y: b.rect.y + b.rect.h / 2 }));
@@ -765,7 +770,7 @@ export class App {
         if (k.k === 'up' || k.k === 'down' || k.k === 'left' || k.k === 'right') this.navigate(k.k);
         else if (k.k === 'tab') this.cycle(1);
         else if (k.k === 'enter') void this.op(this.openSel());
-        else if (k.k === 'wheel') { this.pScroll = Math.max(0, this.pScroll + k.dir * 2); this.dirty = true; }
+        else if (k.k === 'wheel') { this.pScroll = Math.min(this.mapMax(), Math.max(0, this.pScroll + k.dir * 2)); this.dirty = true; }
         else if (k.k === 'mouse' && k.press && k.button === 0) { const h = this.grid.hitTest(k.x, k.y); if (h) { if (h === this.sel) void this.op(this.openSel()); else this.sel = h; this.dirty = true; } }
         else if (k.k === 'esc') { this.project = null; this.pv = null; this.view = 'home'; void this.op(this.load()); }
         else if (k.k === 'char') {

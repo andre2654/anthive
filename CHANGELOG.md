@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A history strip fills the empty part of the map: the last turns, the subagents that ran and the files that were written, oldest first, with the hour and who did it. It appears only when nothing scrolls, so a busy map is untouched. The wheel now stops at the end of the map instead of scrolling into the void.
 - The map shows the work, not only what you registered: the files an agent produced hang off it as nodes, grouped by folder past five, with the folder, the count and who made them. They come from three sources, the write tools, shell redirection (`cat > file`, `tee`, `sed -i`), which is how most real writing happens, and the filesystem for what no tool call names, like a spreadsheet a script wrote. Shell targets only count when the file exists, which turns 61 candidate paths into the 4 real ones on the author's project. `↵` opens the file, `l` pins it to the project as a real file item, `d` refuses. `project_map` lists them.
 
 - The transcript follows the mouse: hovering a message lights the whole block and shows `y copies` at its edge, clicking puts the cursor there, and `y` copies exactly that, flashing it green. With nothing pointed at, `y` takes the agent's last answer, so it always copies something. `Y` still takes the whole turn.

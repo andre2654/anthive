@@ -13,6 +13,7 @@ import { C, G, BG, RGB, sparkline, ago, tok, pad, padStart, fit } from '../tui/t
 import { State, windowOf } from '../core/sessions.ts';
 import { View, Node, Edge, AgentNode, TaskNode, projectName, SubNode, WroteNode } from '../core/project.ts';
 import { threadState } from '../core/store.ts';
+import { relTo } from '../core/written.ts';
 import { windowOf as winOf } from '../core/sessions.ts';
 import { renderMd } from '../tui/markdown.ts';
 import { gauge } from '../tui/theme.ts';
@@ -26,6 +27,7 @@ const GLYPH: Record<State, string> = { running: G.running, waiting: G.waiting, i
 const COLOR: Record<State, RGB> = { running: C.run, waiting: C.hold, idle: C.idle, stuck: C.dead, sleeping: C.frame };
 const LABEL = (s: State) => ({ running: t('running'), waiting: t('approval'), idle: t('idle'), stuck: t('stuck'), sleeping: t('asleep') })[s];
 const SPARK: Record<State, RGB> = { running: C.sparkR, waiting: C.sparkH, idle: C.sparkI, stuck: C.sparkD, sleeping: C.sparkI };
+const hhmm = (ts: number) => new Date(ts).toTimeString().slice(0, 5);
 export const KIND_GLYPH = { agent: G.running, note: G.note, file: '▤', service: '◎', task: G.focus, sub: G.sub, wrote: '▥', browser: '▣' } as const;
 export const PANEL_W = 34;
 export const panelFits = (W: number) => W >= 110;
@@ -386,6 +388,29 @@ export function renderProject(g: Grid, v: View, selected: string | null, scroll:
     const target = rectOf(p.to);
     drawPath(g, { ...p, cells: inside }, e, W, !!target && vis(target));
   }
+  // a história, quando sobra tela: o mapa é presente, a faixa é o passado recente
+  const lowest = L.boxes.reduce((m, b) => Math.max(m, b.rect.y + b.rect.h), 1);
+  const room = bottom - lowest - 1;
+  if (v.moments?.length && room >= 5 && scroll === 0) {
+    const hy = lowest + 1;
+    const label = ` ${t('history')} `;
+    g.put(2, hy, label, C.link);
+    g.put(2 + label.length, hy, G.h.repeat(Math.max(0, W - 4 - label.length)), C.frame);
+    const shown = v.moments.slice(-(bottom - hy - 1));
+    const who = Math.min(12, Math.max(...shown.map((m) => [...m.who].length)));
+    for (let i = 0; i < shown.length; i++) {
+      const m = shown[i]!, y = hy + 1 + i;
+      if (y > bottom) break;
+      const col = m.kind === 'turn' ? C.run : m.kind === 'wrote' ? C.link : C.linkDim;
+      const mark = m.kind === 'turn' ? G.running : m.kind === 'wrote' ? '▥' : G.sub;
+      const what = m.kind === 'wrote' ? relTo(v.project.cwd, m.what) : m.what;
+      g.put(2, y, hhmm(m.ts), C.frame);
+      g.put(8, y, pad(m.who, who), C.dim);
+      g.put(9 + who, y, `${mark} `, col);
+      g.put(11 + who, y, fit(what, Math.max(0, W - 13 - who)), m.kind === 'turn' ? C.ink : C.dim);
+    }
+  }
+
   // pulso: do agente para a ligação, uma célula por frame
   const tick = opts.tick ?? -1;
   if (tick >= 0) {
