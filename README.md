@@ -41,7 +41,7 @@ For the live browser image you need a terminal that speaks the Kitty graphics pr
 
 4. **A new agent reads the map first.** It gets a briefing of the project — the other agents, notes, files, services — and decides what to link to before touching the request. If the repo has no `CLAUDE.md`, it generates one with `/init` and links it to every agent.
 5. **Agents talk to each other** through a small MCP bus: notes with access lists and TTLs, threads with a mandatory goal and a turn budget (only you can extend it), and everything another agent wrote arrives framed as data, not instructions.
-6. **The browser.** `n → browser`, link an agent to it, open the chat. The agent gets `browser_*` tools; you get the page.
+6. **The browser.** `n → browser`, link an agent to it, open the chat. The agent gets `browser_*` tools; you get the page. Linking a browser to a chat that is already open restarts it in place, same session, so the tools arrive without you doing anything.
 
 ![the browser screen: the live page drawn inside the terminal, and on the right what the agent sees — the accessibility refs it clicks](docs/browser.png)
 

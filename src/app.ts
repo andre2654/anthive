@@ -392,6 +392,23 @@ export class App {
   }
 
   /** Ligar tem semântica pelo par: agente⇄agente conversa; agente→nota é leitura; o resto é associação. */
+  /**
+   * O browser entra no processo só na partida: MCP do Playwright, allowlist e
+   * instrução. Ligado a um chat já aberto, o chat reinicia na mesma sessão —
+   * agora se estiver parado, ou quando a resposta terminar se estiver ocupado.
+   */
+  private async armBrowser(agentId: string): Promise<string> {
+    const a = this.agent, c = this.chat;
+    if (!a || !c || a.id !== agentId || !a.item || !this.project) return '';
+    if (c.opts.browser) return '';
+    const it = await P.browserOf(this.project.id, a.item.id);
+    if (!it) return '';
+    try { await P.ensureBrowserServer(a.cwd, it.port); await P.ensureBrowserUp(it); }
+    catch (e) { this.say(t('chrome did not start: {0}', (e as Error).message), 7000); }
+    const later = this.applySetting({ browser: true });
+    return later ? t('browser armed — the chat restarts with its tools when this answer finishes') : t('browser tools on — the chat restarted in the same session, nothing lost');
+  }
+
   async connect(aId: string, bId: string, goal?: string): Promise<string> {
     const a = this.node(aId), b = this.node(bId); if (!a || !b || !this.project) throw new Error(t('node vanished'));
     if (a.kind === 'agent' && b.kind === 'agent') {
@@ -406,7 +423,8 @@ export class App {
     if (ag && other?.kind === 'note') { await store.attach(other.doc.id, [ag.name]); return t('{0} reads {1}', ag.name, other.doc.title); }
     await P.link(this.project.id, aId, bId);
     const br = a.kind === 'browser' || b.kind === 'browser';
-    return `${nodeLabel(a)} → ${nodeLabel(b)}${br ? ` · ${t('reopen the agent chat (x, i) so it gets the browser tools')}` : ''}`;
+    const armed = br && ag ? await this.armBrowser(ag.id) : '';
+    return `${nodeLabel(a)} → ${nodeLabel(b)}${armed ? ` · ${armed}` : br ? ` · ${t('the next chat gets the browser tools')}` : ''}`;
   }
   async commitLink() {
     const src = this.linking?.source, dst = this.sel; if (!src || !dst) return;
@@ -485,7 +503,7 @@ export class App {
   }
   /** A model/effort/permission change asked mid-turn: applied by a restart when the answer arrives. */
   private thumbKey = '';
-  private pendingPatch: Partial<Pick<ChatSession, 'model' | 'effort' | 'permissionMode'>> | null = null;
+  private pendingPatch: (Partial<Pick<ChatSession, 'model' | 'effort' | 'permissionMode'>> & { browser?: boolean }) | null = null;
   private get live() { const c = this.chat; return c ? { model: c.model, effort: c.effort, permissionMode: c.permissionMode, deep: c.deep, busy: c.busy, thinking: c.thinking, summary: c.summary, cost: c.cost, subs: this.subChips() } : null; }
   /** The subagents of the open agent, as the map read them from their own files. */
   private subChips(): SubChip[] {
@@ -682,7 +700,7 @@ export class App {
     if (e.kind === 'ev') { if (this.watchOnly) { this.dirty = true; return; } this.evs.push(e.ev); this.rebuild(true); }   // watching a subagent: the tree on screen is not this chat's
     else if (e.kind === 'result') {
       this.screen.write('\x07');
-      if (this.pendingPatch && this.chat && !this.chat.busy) { const patch = this.pendingPatch; this.pendingPatch = null; this.chat.restart(patch); this.say(t('applied now: {0} — same session', Object.entries(patch).map(([k, v]) => `${k} ${v || t('default')}`).join(', ')), 5000); }
+      if (this.pendingPatch && this.chat && !this.chat.busy) { const patch = this.pendingPatch; this.pendingPatch = null; this.chat.restart(patch); this.say(t('applied now: {0} — same session', Object.entries(patch).map(([k, v]) => (k === 'browser' ? t('browser tools') : `${k} ${v || t('default')}`)).join(', ')), 5000); }
       const web = e.denials.some((d) => d === 'WebSearch' || d === 'WebFetch');
       const den = e.denials.length ? ` · ${web ? t('denied {0} — D or tab (deep search) allows the web', e.denials.join(', ')) : t('denied {0} — p changes permissions', e.denials.join(', '))}` : '';
       const note = this.chat?.deep ? /note:\/\/([\w-]+)/.exec(e.text)?.[1] : null;
@@ -718,7 +736,7 @@ export class App {
   }
 
   /** Restarts the chat with the change now, or after the answer when it is mid-turn (a restart kills the turn and its subagents). Returns true when deferred. */
-  private applySetting(patch: Partial<Pick<ChatSession, 'model' | 'effort' | 'permissionMode'>>): boolean {
+  private applySetting(patch: Partial<Pick<ChatSession, 'model' | 'effort' | 'permissionMode'>> & { browser?: boolean }): boolean {
     const c = this.chat; if (!c) return false;
     if (!c.busy) { c.restart(patch); return false; }
     this.pendingPatch = { ...this.pendingPatch, ...patch };

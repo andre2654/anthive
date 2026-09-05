@@ -263,6 +263,7 @@ export const browserProfile = (it: BrowserItem) => join(ROOT, 'browsers', it.id)
 
 /** Sobe o Chrome deste browser se não estiver de pé. */
 export async function ensureBrowserUp(it: BrowserItem): Promise<'was up' | 'started'> {
+  if (process.env.ANTHIVE_NO_CHROME) return 'was up';   // testes: o agente ganha as ferramentas, o Chrome não sobe
   if (await isUp(it.port)) return 'was up';
   const chrome = await findChrome();
   if (!chrome) throw new Error(t('no Chrome on this machine (Google Chrome, or `npx playwright install chromium`)'));

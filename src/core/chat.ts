@@ -193,8 +193,10 @@ export class ChatSession {
   }
 
   /** Troca modelo/esforço/permissão: reinicia com --resume na mesma sessão. */
-  restart(patch: Partial<Pick<ChatSession, 'model' | 'effort' | 'permissionMode' | 'deep'>>) {
-    Object.assign(this, patch);
+  restart(patch: Partial<Pick<ChatSession, 'model' | 'effort' | 'permissionMode' | 'deep'>> & { browser?: boolean }) {
+    const { browser, ...rest } = patch;
+    if (browser !== undefined) this.opts.browser = browser;   // entra no argv: MCP do Playwright, allowlist e instrução
+    Object.assign(this, rest);
     this.stop();
     this.start();
   }

@@ -191,6 +191,29 @@ must('the turn finishes', await waitFor(() => !app.chat?.busy, 5000));
 type(app, 'x');
 must('x on an idle chat stops it without asking', !app.chat && app.modal === null);
 
+// --- a browser linked to a live chat: the process restarts with its tools, in place ---
+process.env.ANTHIVE_NO_CHROME = '1';
+const before = argvLines().length;
+type(app, 'i'); await settle();
+must('a chat is up for the browser test', (await waitFor(() => argvLines().length === before + 1)) && !!app.chat && !argvLines()[before]!.includes('mcp__playwright'));
+const brItem = await P.addBrowser(app.project!, 'hidden');
+await app.load();
+const msg1 = await app.connect(api.id, brItem.id);
+must('linking while idle restarts at once, and the new process has the browser', /restarted/.test(msg1) && (await waitFor(() => argvLines().length === before + 2)) && argvLines()[before + 1]!.includes('mcp__playwright') && !!app.chat);
+must('and the agent is told how to use it', argvLines()[before + 1]!.includes('snapshot'));
+await sleep(300);
+type(app, 'slow again'); press(app, 'enter'); await sleep(100);
+must('the chat is busy again', !!app.chat?.busy);
+await P.unlink(app.project!.id, api.id, brItem.id).catch(() => {});
+(app.chat as any).opts.browser = false;   // pretend it never had it, to exercise the busy path
+await app.load();
+const msg2 = await app.connect(api.id, brItem.id);
+must('linking mid-turn arms the restart instead of killing the turn', /armed/.test(msg2) && argvLines().length === before + 2 && !!app.chat);
+must('when the answer lands the chat restarts with the browser', (await waitFor(() => argvLines().length === before + 3, 5000)) && argvLines()[before + 2]!.includes('mcp__playwright'));
+press(app, 'esc'); type(app, 'x');
+must('x stops it for the next tests', !app.chat);
+delete process.env.ANTHIVE_NO_CHROME;
+
 // --- s gives the mouse back to the terminal, and freezes the frame while you select ---
 type(app, 's');
 must('s freezes the screen and says how to come back', app.selecting && app.status.includes('frozen'));
