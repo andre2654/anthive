@@ -1,5 +1,6 @@
 /** Fala JSON-RPC de verdade com o servidor MCP, como um agente faria. */
 import { mkdtempSync } from 'node:fs';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -10,6 +11,12 @@ process.env.ANTHIVE_HOME = HOME; process.env.ANTHIVE_CLAUDE_PROJECTS = CP;
 const P = await import('../src/core/project.ts');
 const { mkdirSync, writeFileSync, realpathSync } = await import('node:fs');
 const repo = realpathSync(mkdtempSync(join(tmpdir(), 'tai-mcp-repo-')));
+// a fake claude for the first turn agent_create fires: it logs its argv and exits
+const fakeBin = await mkdtemp(join(tmpdir(), 'anthive-fake-claude-'));
+const fakeLog = join(fakeBin, 'argv.log');
+await writeFile(join(fakeBin, 'claude'), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${fakeLog}"\n`, { mode: 0o755 });
+process.env.PATH = `${fakeBin}:${process.env.PATH}`;
+process.env.ANTHIVE_NO_CHROME = '1';
 const project = await P.createProject('hive', repo);
 const apiAgent = await P.addAgent(project, 'api'); await P.addAgent(project, 'db');
 const slugDir = join(CP, await P.claudeSlug(apiAgent.cwd)); mkdirSync(slugDir, { recursive: true });
@@ -44,7 +51,7 @@ const text = (r: any) => r?.result?.content?.[0]?.text ?? '';
 let res = await session('api', [init, { jsonrpc: '2.0', id: 2, method: 'tools/list' }]);
 must('initialize responde com serverInfo', res[0]?.result?.serverInfo?.name === 'anthive');
 const names = (res[1]?.result?.tools ?? []).map((t: any) => t.name);
-must('tools/list expõe o barramento inteiro', ['note_write', 'note_read', 'send_message', 'inbox', 'thread_conclude', 'project_map', 'project_search'].every((n) => names.includes(n)));
+must('tools/list expõe o barramento inteiro', ['note_write', 'note_read', 'send_message', 'inbox', 'thread_conclude', 'project_map', 'project_search', 'agent_create', 'browser_create', 'link'].every((n) => names.includes(n)));
 must('toda ferramenta tem inputSchema', res[1].result.tools.every((t: any) => t.inputSchema?.type === 'object'));
 
 // --- api abre conversa e manda mensagem ---
@@ -99,6 +106,29 @@ must('an unknown command waits on disk for the user', !!req && req.agent === 'ap
 if (req) await A.decide(req.id, 'deny', 'the user said no');
 res = await waiting;
 must('the user\'s no becomes a deny with a message', JSON.parse(text(res[1])).behavior === 'deny' && /Anthive/.test(JSON.parse(text(res[1])).message));
+
+// --- assembling a team from the bus: agent_create, browser_create, link ---
+const born = await session('api', [init, call(30, 'agent_create', { name: 'worker', prompt: 'close out PR #790', link: 'db' })]);
+const bornText = String(born[1]?.result?.content?.[0]?.text ?? '');
+must('agent_create answers with the agent, its links and the running first turn', /Agent worker created/.test(bornText) && /Linked to: api, db/.test(bornText) && /first turn is running/.test(bornText) && !born[1]?.result?.isError);
+const g1 = await P.loadGraph(project.id);
+const worker = g1.items.find((i): i is P.AgentItem => i.kind === 'agent' && i.name === 'worker');
+must('the agent is in the graph with a session and the briefing flag', !!worker?.sessionId && (worker as any).briefingPending === true);
+must('linked to the caller and to what was asked', !!worker && g1.links.filter((l) => l.from === worker.id || l.to === worker.id).length === 2);
+const waitLog = async () => { for (let i = 0; i < 40; i++) { const t = await Bun.file(fakeLog).text().catch(() => ''); if (t.includes('close out PR #790')) return t; await new Promise((r) => setTimeout(r, 50)); } return await Bun.file(fakeLog).text().catch(() => ''); };
+const log = await waitLog();
+must('the first turn really started: claude got the session id and the request inside a briefing', log.includes(`--session-id ${worker?.sessionId}`) || log.includes(`--resume ${worker?.sessionId}`)) ;
+must('and the request travels inside the briefing, with the bus allowed', log.includes('close out PR #790') && log.includes('mcp__anthive'));
+const dup = await session('api', [init, call(31, 'agent_create', { name: 'worker', prompt: 'again' })]);
+must('a second agent with the same name is refused', dup[1]?.result?.isError === true);
+const br = await session('api', [init, call(32, 'browser_create', {})]);
+must('browser_create adds the browser', /Browser added/.test(String(br[1]?.result?.content?.[0]?.text)) && (await P.loadGraph(project.id)).items.some((i) => i.kind === 'browser'));
+const lk = await session('api', [init, call(33, 'link', { from: 'worker', to: 'browser' })]);
+const g2 = await P.loadGraph(project.id);
+const brItem = g2.items.find((i) => i.kind === 'browser')!;
+must('link joins two nodes by name', /linked/.test(String(lk[1]?.result?.content?.[0]?.text)) && g2.links.some((l) => (l.from === worker!.id && l.to === brItem.id) || (l.to === worker!.id && l.from === brItem.id)));
+const nope = await session('api', [init, call(34, 'link', { from: 'worker', to: 'nobody-here' })]);
+must('an unknown name is an error, not a silent no-op', nope[1]?.result?.isError === true);
 
 console.log(fails ? `\n${fails} falha(s)` : '\ntudo verde');
 process.exit(fails ? 1 : 0);

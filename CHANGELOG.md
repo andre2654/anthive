@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- An agent can assemble its own team. Three bus tools: `agent_create` (name, first request, optional worktree branch, `browser=true`, and names to link) creates the agent already linked to the caller, gives it the briefing of the map and starts its first turn in the background; `browser_create` adds the project browser; `link` joins two nodes by name. The system prompt tells agents this is the only way, never by writing Anthive's files or starting claude themselves, which is exactly what a maestro tried to do when it found no such tool.
+- Fixed: an agent's briefing reply `link: a, b` was never applied, because the app only looked for the old Portuguese `ligar:`.
+
 - Fixed: a browser linked to a chat that was already open never reached the agent, which then said it had no browser tools. The Playwright MCP, its allowlist entry and its instruction only enter the process at start, so linking now restarts the chat in the same session: at once when the agent is idle, or when the answer finishes when it is busy. The status says which. The old advice to close and reopen the chat is gone.
 
 - Drag files and folders onto the terminal. What the terminal writes as a shell-escaped path is now read as a drop: images attach to the turn, and documents and folders become project items linked to the agent you are talking to, or to the selected agent on the map. A folder is drawn as one and opens as a listing. Spaces, quotes and `file://` are handled.

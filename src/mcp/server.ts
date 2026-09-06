@@ -10,7 +10,8 @@
  */
 import * as store from '../core/store.ts';
 import * as bus from '../core/bus.ts';
-import { listProjects, loadGraph, view as projectView, Project } from '../core/project.ts';
+import { listProjects, loadGraph, view as projectView, Project, addAgent, addBrowser, link as linkNodes, ensureBus, buildBriefing, firstTurn, ensureBrowserServer, ensureBrowserUp, saveGraph} from '../core/project.ts';
+import type { View, Node, BrowserItem } from '../core/project.ts';
 import { searchProject, formatHits, Scope } from '../core/search.ts';
 import * as approvals from '../core/approvals.ts';
 
@@ -26,6 +27,16 @@ async function myProject(): Promise<Project | null> {
   return all.find((p) => cwd === p.cwd || cwd.startsWith(p.cwd + '/')) ?? null;
 }
 
+const nodeNameOf = (n: Node) => n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.kind === 'sub' ? n.sub.name : n.kind === 'wrote' ? n.label : n.kind === 'browser' ? 'browser' : n.item.name;
+/** Um nó pelo nome: exato primeiro, depois por pedaço — a mesma leitura que o briefing faz. */
+function findNode(v: View, q: string): Node | null {
+  const w = q.trim().toLowerCase();
+  if (!w) return null;
+  const label = (n: Node) => nodeNameOf(n).toLowerCase();
+  const alt = (n: Node) => (n.kind === 'note' ? n.doc.id.toLowerCase() : n.kind === 'file' ? n.item.path.toLowerCase() : '');
+  return v.nodes.find((n) => label(n) === w || alt(n) === w) ?? v.nodes.find((n) => label(n).includes(w) || alt(n).endsWith(w)) ?? null;
+}
+
 const PROTOCOL = '2025-06-18';
 const ME = () => process.env.ANTHIVE_AGENT ?? 'anonymous';
 
@@ -33,6 +44,7 @@ type Json = Record<string, any>;
 interface Tool { name: string; description: string; schema: Json; run: (a: Json) => Promise<string> }
 
 const str = (d: string) => ({ type: 'string', description: d });
+const bool = (d: string) => ({ type: 'boolean', description: d });
 const obj = (props: Json, required: string[] = []) =>
   ({ type: 'object', properties: props, required, additionalProperties: false });
 
@@ -168,6 +180,77 @@ const TOOLS: Tool[] = [
         acl: [ME()], ttl: store.parseTTL(a.ttl as string | undefined), project: p?.id,
       });
       return `Created note://${d.id}${p ? ` in project ${p.name}` : ' (outside any Anthive project)'}, linked to ${ME()}.`;
+    },
+  },
+  {
+    name: 'agent_create',
+    description:
+      'Creates a new agent in this project and starts its first turn in the background, with a briefing of the map. ' +
+      'It appears on the Anthive map within two seconds, already linked to you. Give it a name and the first request; ' +
+      'optionally a git branch for a worktree of its own, browser=true so it gets the browser_* tools, and link= names of ' +
+      'notes, files or agents to hand it. Talk to it afterwards with send_message. This is the only way to create an agent: ' +
+      'never write Anthive files or start claude yourself.',
+    schema: obj({ name: str('short name, unique in the project'), prompt: str('its first request, complete: it is all the agent knows besides the map'), worktree: str('git branch for a worktree of its own (optional)'), browser: bool('true = link it to the project browser, creating one if needed'), link: str('comma-separated names of notes, files or agents to link to it (optional)') }, ['name', 'prompt']),
+    async run(a) {
+      const p = await myProject();
+      if (!p) throw new Error('You are not in any Anthive project.');
+      const it = await addAgent(p, String(a.name), { worktree: a.worktree ? String(a.worktree) : undefined });
+      await ensureBus(it.cwd);
+      const linked: string[] = [];
+      const me = ME();
+      if (me !== 'anonymous') { const meItem = (await loadGraph(p.id)).items.find((i) => i.kind === 'agent' && i.name === me); if (meItem) { await linkNodes(p.id, meItem.id, it.id); linked.push(me); } }
+      let browser = false;
+      if (a.browser === true || a.browser === 'true') {
+        let br = (await loadGraph(p.id)).items.find((i): i is BrowserItem => i.kind === 'browser');
+        if (!br) br = await addBrowser(p, 'hidden');
+        await linkNodes(p.id, it.id, br.id); linked.push('browser');
+        try { await ensureBrowserServer(it.cwd, br.port); await ensureBrowserUp(br); browser = true; }
+        catch (e) { linked.push(`browser (chrome did not start: ${(e as Error).message})`); }
+      }
+      const v0 = await projectView(p);
+      for (const q of String(a.link ?? '').split(',').map((x) => x.trim()).filter(Boolean)) {
+        const n = findNode(v0, q);
+        if (!n || n.id === it.id) { linked.push(`${q} (not found)`); continue; }
+        if (n.kind === 'note') await store.attach(n.doc.id, [it.name]); else await linkNodes(p.id, it.id, n.id);
+        linked.push(q);
+      }
+      const v = await projectView(p);
+      await firstTurn(it, buildBriefing(v, it.name, String(a.prompt)), browser);
+      const g = await loadGraph(p.id); const stored = g.items.find((x) => x.id === it.id); if (stored) { (stored as any).briefingPending = true; await saveGraph(p.id, g); }
+      return `Agent ${it.name} created (session ${it.sessionId}) in ${it.cwd}${it.worktree ? ` on worktree ${it.worktree}` : ''}. Linked to: ${linked.join(', ') || 'nothing'}. ` +
+        'Its first turn is running in the background: it reads the map, then your request. Follow it on the map; send_message reaches its inbox for the next turn.';
+    },
+  },
+  {
+    name: 'browser_create',
+    description: 'Adds a browser to the project (a Chrome the agents linked to it can drive with browser_* tools). Returns its id; link agents to it with link, or create them with browser=true.',
+    schema: obj({ mode: str("'hidden' (default, no window) or 'window'") }),
+    async run(a) {
+      const p = await myProject();
+      if (!p) throw new Error('You are not in any Anthive project.');
+      const existing = (await loadGraph(p.id)).items.find((i): i is BrowserItem => i.kind === 'browser');
+      if (existing) return `The project already has a browser (${existing.mode}, port ${existing.port}); link agents to it with link.`;
+      const it = await addBrowser(p, a.mode === 'window' ? 'window' : 'hidden');
+      return `Browser added (${it.mode}, port ${it.port}). Link an agent to it and its next chat gets the browser_* tools.`;
+    },
+  },
+  {
+    name: 'link',
+    description: 'Links two things on the map by name: agents, notes (by title), files (by label) or "browser". An agent linked to a note can read it; to a file, may work on it; to the browser, drives it.',
+    schema: obj({ from: str('name of one node'), to: str('name of the other') }, ['from', 'to']),
+    async run(a) {
+      const p = await myProject();
+      if (!p) throw new Error('You are not in any Anthive project.');
+      const v = await projectView(p);
+      const x = findNode(v, String(a.from)), y = findNode(v, String(a.to));
+      if (!x) throw new Error(`No node named "${a.from}" on the map.`);
+      if (!y) throw new Error(`No node named "${a.to}" on the map.`);
+      if (x.id === y.id) throw new Error('Pick two different nodes.');
+      const [ag, other] = x.kind === 'agent' ? [x, y] : y.kind === 'agent' ? [y, x] : [null, null];
+      if (ag && other?.kind === 'note') { await store.attach(other.doc.id, [ag.name]); return `${ag.name} now reads note "${other.doc.title}".`; }
+      if (x.kind === 'sub' || y.kind === 'sub' || x.kind === 'wrote' || y.kind === 'wrote' || x.kind === 'task' || y.kind === 'task') throw new Error('Subagents, tasks and produced files cannot be linked; link the agent or a real file.');
+      await linkNodes(p.id, x.id, y.id);
+      return `${nodeNameOf(x)} → ${nodeNameOf(y)} linked.${(x.kind === 'browser' || y.kind === 'browser') ? ' The agent gets the browser tools on its next chat.' : ''}`;
     },
   },
   {

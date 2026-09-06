@@ -40,7 +40,7 @@ For the live browser image you need a terminal that speaks the Kitty graphics pr
    ![the agent chat: the transcript as a tree, tool calls collapsed, browser actions marked, and the panel with memory, links and tasks](docs/chat.png)
 
 4. **A new agent reads the map first.** It gets a briefing of the project — the other agents, notes, files, services — and decides what to link to before touching the request. If the repo has no `CLAUDE.md`, it generates one with `/init` and links it to every agent.
-5. **Agents talk to each other** through a small MCP bus: notes with access lists and TTLs, threads with a mandatory goal and a turn budget (only you can extend it), and everything another agent wrote arrives framed as data, not instructions.
+5. **Agents talk to each other, and hire each other,** through a small MCP bus: `agent_create` spawns a worker with its first request, already on the map and linked to whoever created it; notes with access lists and TTLs, threads with a mandatory goal and a turn budget (only you can extend it), and everything another agent wrote arrives framed as data, not instructions.
 6. **The browser.** `n → browser`, link an agent to it, open the chat. The agent gets `browser_*` tools; you get the page. Linking a browser to a chat that is already open restarts it in place, same session, so the tools arrive without you doing anything.
 
 ![the browser screen: the live page drawn inside the terminal, and on the right what the agent sees — the accessibility refs it clicks](docs/browser.png)
@@ -68,7 +68,7 @@ In an agent's chat, `D` opens the input box with the `[deep]` chip on (Tab toggl
 
 - **Own renderer.** A character grid with per-cell colors, frame diffing and mouse hit-testing. No curses, no React. The whole UI is ~5k lines of TypeScript on Bun, compiled to one binary.
 - **Agents are `claude -p`.** Each agent is a Claude Code process in `stream-json` mode with a fixed session id, so the transcript in `~/.claude/projects` stays the single source of truth. Anthive reads those transcripts for everything it shows: state, context usage, tasks, diffs, browser activity.
-- **The bus is MCP.** `anthive mcp` is a JSON-RPC server over stdio that Claude Code loads from the project's `.mcp.json`: `note_write`, `note_read`, `notes_list`, `project_map`, `project_search`, `send_message`, `inbox`, `thread_*`, `agents_list` — plus `permission_prompt`, which Claude Code itself calls.
+- **The bus is MCP.** `anthive mcp` is a JSON-RPC server over stdio that Claude Code loads from the project's `.mcp.json`: `note_write`, `note_read`, `notes_list`, `project_map`, `project_search`, `send_message`, `inbox`, `thread_*`, `agents_list`, and the team tools `agent_create`, `browser_create` and `link`, so a maestro can spawn workers with a brief, a worktree and a browser, and hand them notes — plus `permission_prompt`, which Claude Code itself calls.
 - **The browser is CDP.** `Page.startScreencast` for the picture, `Input.*` for your clicks, `Target.*` to follow the tab the agent is on. PNG frames become Kitty graphics escape sequences; the terminal reports its cell size so the aspect ratio holds and clicks map back to page coordinates.
 
 ## What it writes, and where

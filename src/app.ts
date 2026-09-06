@@ -111,7 +111,7 @@ export class App {
       const node = this.pv.nodes.find((n): n is P.AgentNode => n.kind === 'agent' && n.id === it.id);
       if (!node?.session) continue;
       const evs = await parseSession(node.session.path);
-      const reply = evs.find((e) => e.role === 'assistant' && e.text && /ligar:/i.test(e.text))?.text;
+      const reply = evs.find((e) => e.role === 'assistant' && e.text && /\b(link|ligar):/i.test(e.text))?.text;
       if (!reply) continue;
       for (const id of P.parseBriefingReply(this.pv, reply)) await this.connect(node.id, id, 'contexto');
       delete (it as any).briefingPending; changed = true;
