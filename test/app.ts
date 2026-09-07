@@ -97,7 +97,7 @@ type(app, 'fechar o schema'); press(app, 'enter'); await settle();
 must('conversa gravada', (await store.list('thread')).some((t) => t.goal === 'fechar o schema'));
 must('aresta de conversa no grafo', app.pv?.edges.some((e) => e.kind === 'talk') === true);
 app.render();
-must('desenha o turno na aresta', app.grid.toString().includes('⇄ 0/6'));
+must('desenha o turno da conversa dentro da caixa do agente', /⇄ (db|api) 0\/6/.test(app.grid.toString()));
 
 // --- ligar nota a db por gesto (leitura, sem perguntar) ---
 app.sel = note!.id; type(app, 'l'); app.sel = db.id; press(app, 'enter'); await settle();

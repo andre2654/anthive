@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The map is a tree now, not a circuit board. With five agents and sixteen notes the old map drew 61 routed wires through 46 lanes in a gutter that held 12, spilled lines over the boxes and ran 129 rows deep. Wires are gone: the notes only one agent reads hang under that agent like its subagents, everything shared sits in a dense ledger on the right, one line per note, task, produced folder, file or service, in sections. Relations show on selection, the neighbours of the selected node light up with a `▎` marker, and threads between agents live inside the agent box as `⇄ name 3/6`. The same project fits one screen. The pulse animation is gone with the wires, so the map no longer redraws ten times a second.
+- Produced files of an agent working in a worktree are labelled relative to that worktree, not as absolute paths.
+
 - Selection mode can no longer pass for a freeze: the frozen frame carries a banner across the top saying what it is, and any key returns to the app instead of being swallowed. The one warning it used to give sat in the status bar and was cut off.
 
 - An agent can assemble its own team. Three bus tools: `agent_create` (name, first request, optional worktree branch, `browser=true`, and names to link) creates the agent already linked to the caller, gives it the briefing of the map and starts its first turn in the background; `browser_create` adds the project browser; `link` joins two nodes by name. The system prompt tells agents this is the only way, never by writing Anthive's files or starting claude themselves, which is exactly what a maestro tried to do when it found no such tool.

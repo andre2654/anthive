@@ -471,7 +471,7 @@ export async function view(p: Project): Promise<View> {
   // Uma pasta é um nó só, com o dono de quem mais escreveu nela; passa a ser
   // arquivo por arquivo quando o projeto todo produziu cinco ou menos.
   const onMap = new Set<string>(nodes.filter((n): n is FileNode => n.kind === 'file').map((n) => n.item.path));
-  const work = new Map<string, Write & { agent: string | null }>();
+  const work = new Map<string, Write & { agent: string | null; root: string }>();
   let oldest = Date.now();
   for (const a of nodes.filter((n): n is AgentNode => n.kind === 'agent')) {
     if (!a.session) continue;
@@ -479,28 +479,28 @@ export async function view(p: Project): Promise<View> {
     for (const w of await writesOfSession(a.session.path, a.session.bytes, a.name, [p.cwd, a.cwd]).catch(() => [] as Write[])) {
       if (onMap.has(w.path)) continue;
       const cur = work.get(w.path);
-      if (!cur) work.set(w.path, { ...w, agent: a.id });
+      if (!cur) work.set(w.path, { ...w, agent: a.id, root: a.cwd });
       else { cur.count += w.count; cur.ts = Math.max(cur.ts, w.ts); }
     }
   }
   // o que só o disco sabe: uma planilha gerada por um script que o agente rodou
   for (const f of await changedFiles(p.cwd, oldest).catch(() => [])) {
     if (onMap.has(f.path) || work.has(f.path)) continue;
-    work.set(f.path, { path: f.path, how: 'seen', count: 1, ts: f.ts, by: '', agent: null });
+    work.set(f.path, { path: f.path, how: 'seen', count: 1, ts: f.ts, by: '', agent: null, root: p.cwd });
   }
   const all = [...work.values()].sort((x, y) => y.ts - x.ts);
   const wrote: WroteNode[] = [];
   if (all.length && all.length <= 5) {
-    for (const w of all) wrote.push({ kind: 'wrote', id: `wrote-${relTo(p.cwd, w.path)}`, label: relTo(p.cwd, w.path), path: w.path, how: w.how, count: w.count, ts: w.ts, agent: w.agent, group: [] });
+    for (const w of all) wrote.push({ kind: 'wrote', id: `wrote-${relTo([w.root, p.cwd], w.path)}`, label: relTo([w.root, p.cwd], w.path), path: w.path, how: w.how, count: w.count, ts: w.ts, agent: w.agent, group: [] });
   } else {
-    const dirs = new Map<string, (Write & { agent: string | null })[]>();
-    for (const w of all) { const d = folderOf(p.cwd, w.path); const list = dirs.get(d); if (list) list.push(w); else dirs.set(d, [w]); }
+    const dirs = new Map<string, (Write & { agent: string | null; root: string })[]>();
+    for (const w of all) { const d = folderOf([w.root, p.cwd], w.path); const list = dirs.get(d); if (list) list.push(w); else dirs.set(d, [w]); }
     for (const [dir, ws] of dirs) {
       const votes = new Map<string, number>();
       for (const w of ws) if (w.agent) votes.set(w.agent, (votes.get(w.agent) ?? 0) + 1);
       const owner = [...votes.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
       wrote.push({
-        kind: 'wrote', id: `wrote-dir-${dir}`, label: dir === '.' ? `${p.name}/` : `${dir}/`, path: dir === '.' ? p.cwd : join(p.cwd, dir),
+        kind: 'wrote', id: `wrote-dir-${dir}`, label: dir === '.' ? `${p.name}/` : `${dir}/`, path: dir === '.' ? ws[0]!.root : join(ws[0]!.root, dir),
         how: ws.some((w) => w.how === 'tool') ? 'tool' : ws.some((w) => w.how === 'shell') ? 'shell' : 'seen',
         count: ws.reduce((n, w) => n + w.count, 0), ts: Math.max(...ws.map((w) => w.ts)), agent: owner,
         group: ws.map((w) => basename(w.path)),

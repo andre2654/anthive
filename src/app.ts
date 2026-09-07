@@ -1055,7 +1055,7 @@ export class App {
     }
   }
   private linksOf(id: string): string[] { return (this.pv?.edges ?? []).filter((e) => e.from === id || e.to === id).map((e) => { const n = this.node(e.from === id ? e.to : e.from); return n ? nodeLabel(n) : '?'; }); }
-  private pulsing() { return this.view === 'project' && !this.modal && !!this.pv && this.pv.edges.some((e) => e.kind !== 'talk' || (e.thread && store.threadState(e.thread).state === 'open')); }
+  private pulsing() { return false; }   // o mapa em árvore não tem fio para pulsar: sem animação, sem redesenho a cada 100 ms
 
   quit(): never { this.chat?.stop(); this.screen.restore(); process.exit(0); }
   /** q: quitting kills the live chat with its subagents — asks when the agent is mid-turn. */

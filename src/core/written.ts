@@ -195,8 +195,8 @@ export async function changedFiles(cwd: string, since: number): Promise<{ path: 
   return files.filter((f) => f.ts >= since);
 }
 
-/** O rótulo curto de um caminho, relativo ao projeto. */
-export const relTo = (cwd: string, p: string) => (inside(p, cwd) ? p.slice(cwd.length + 1) : p);
-/** A pasta de um caminho, relativa ao projeto; a raiz vira '.'. */
-export const folderOf = (cwd: string, p: string) => dirname(relTo(cwd, p)) || '.';
+/** O rótulo curto de um caminho: relativo à primeira raiz que o contém (o worktree do agente antes do projeto). */
+export const relTo = (roots: string | string[], p: string) => { for (const r of Array.isArray(roots) ? roots : [roots]) if (r && inside(p, r)) return p.slice(r.length + 1) || '.'; return p; };
+/** A pasta de um caminho, relativa à raiz que o contém; a raiz vira '.'. */
+export const folderOf = (roots: string | string[], p: string) => { const rel = relTo(roots, p); return rel === p ? dirname(p) : (dirname(rel) || '.'); };
 export { basename };
