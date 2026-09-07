@@ -242,7 +242,7 @@ function drawPanel(g: Grid, x: number, top: number, bottom: number, p: PanelData
  */
 export function renderPlain(g: Grid, all: Row[], scroll: number, name: string, hint: string) {
   const { W, H } = g;
-  g.put(0, 0, fit(`${name}  ${G.h}  ${hint}`, W), C.frame);
+  g.put(0, 0, pad(fit(`${name}  ${G.h}  ${hint}`, W), W), C.inkHi, BG.copy);   // a faixa do modo: visível, não um aviso apagado
   const slice = all.slice(scroll, scroll + H - 1);
   for (let i = 0; i < slice.length; i++) {
     const r = slice[i]!, y = i + 1;

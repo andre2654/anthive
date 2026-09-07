@@ -225,8 +225,11 @@ must('the frozen frame drops the frame, the gutter and the panel', (() => {
   const lines = app.grid.toString().split('\n');
   return !lines.some((l) => l.includes('│') || l.includes('▎') || l.includes('╭'));
 })());
+must('the frozen frame carries a banner saying what it is', app.grid.toString().includes('SELECTION MODE'));
 type(app, 'i');
-must('other keys do nothing while selecting', !app.composing && app.selecting);
+must('any other key leaves selection mode instead of being swallowed', !app.selecting && !app.composing);
+type(app, 's');
+must('s enters again', app.selecting);
 press(app, 'esc');
 must('esc gives the mouse back to the app', !app.selecting);
 app.render();

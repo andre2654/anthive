@@ -112,7 +112,7 @@ const born = await session('api', [init, call(30, 'agent_create', { name: 'worke
 const bornText = String(born[1]?.result?.content?.[0]?.text ?? '');
 must('agent_create answers with the agent, its links and the running first turn', /Agent worker created/.test(bornText) && /Linked to: api, db/.test(bornText) && /first turn is running/.test(bornText) && !born[1]?.result?.isError);
 const g1 = await P.loadGraph(project.id);
-const worker = g1.items.find((i): i is P.AgentItem => i.kind === 'agent' && i.name === 'worker');
+const worker = g1.items.find((i) => i.kind === 'agent' && i.name === 'worker') as { id: string; sessionId: string | null } | undefined;
 must('the agent is in the graph with a session and the briefing flag', !!worker?.sessionId && (worker as any).briefingPending === true);
 must('linked to the caller and to what was asked', !!worker && g1.links.filter((l) => l.from === worker.id || l.to === worker.id).length === 2);
 const waitLog = async () => { for (let i = 0; i < 40; i++) { const t = await Bun.file(fakeLog).text().catch(() => ''); if (t.includes('close out PR #790')) return t; await new Promise((r) => setTimeout(r, 50)); } return await Bun.file(fakeLog).text().catch(() => ''); };

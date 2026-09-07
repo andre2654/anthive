@@ -1,6 +1,6 @@
 import { Grid } from './tui/grid.ts';
 import { Screen, Key } from './tui/screen.ts';
-import { C, G, tok } from './tui/theme.ts';
+import { C, G, tok, BG, pad } from './tui/theme.ts';
 import { TextInput, Form } from './tui/input.ts';
 import { renderForm, renderConfirm, renderPick, renderApproval, PickItem } from './views/prompt.ts';
 import { renderHome, layoutHome } from './views/home.ts';
@@ -34,6 +34,9 @@ type Modal =
   | { kind: 'approval'; req: A.Request; linkable: string | null };
 
 const nodeLabel = (n: P.Node) => n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.kind === 'sub' ? n.sub.name : n.kind === 'wrote' ? n.label : n.kind === 'browser' ? 'browser' : n.item.name;
+
+/** O que a tela parada diz de si: vale para o mapa e para o chat. */
+const SELECT_BANNER = 'SELECTION MODE — screen frozen so you can select and copy — press any key to return';
 
 export class App {
   screen = new Screen();
@@ -565,12 +568,18 @@ export class App {
   flashEv: string | null = null;      // the message just copied, lit for a moment
   private flashUntil = 0;
   toggleSelect() {
-    if (this.selecting) { this.selecting = false; this.screen.setMouse(true); this.say(t('selection off — the mouse is the app\'s again')); this.dirty = true; return; }
-    this.say(t('select with the mouse and copy — the screen is frozen; s or esc returns'), 3_600_000);
+    if (this.selecting) { this.selecting = false; this.screen.setMouse(true); this.prev = null; this.say(t('selection off — the mouse is the app\'s again')); this.dirty = true; return; }
+    this.say(t('select with the mouse and copy — the screen is frozen; any key returns'), 3_600_000);
     this.render();
     this.selecting = true;
     this.screen.setMouse(false);
     if (this.view === 'agent') { this.selScroll = -1; this.paintPlain(); }
+    else {
+      // a faixa no topo do quadro congelado: o aviso na barra de baixo era fácil de perder
+      this.grid.put(0, 0, pad(` ${SELECT_BANNER} `, this.grid.W), C.inkHi, BG.copy);
+      this.screen.write(this.grid.diff(this.prev));
+      this.prev = null;   // ao voltar, repinta tudo
+    }
   }
 
   /** The frozen frame for the agent view: the text alone, wrapped to the whole screen, so a copy brings text and nothing else. */
@@ -585,7 +594,7 @@ export class App {
     this.selScroll = Math.max(0, Math.min(max, this.selScroll + scrollBy));
     const scroll = this.selScroll;
     this.grid.clear();
-    renderPlain(this.grid, rowsWide, scroll, this.agent?.name ?? '', t('{0}-{1} of {2}  —  ↑↓ wheel g G scroll  —  s or esc returns', scroll + 1, Math.min(rowsWide.length, scroll + page), rowsWide.length));
+    renderPlain(this.grid, rowsWide, scroll, this.agent?.name ?? '', t('{0}-{1} of {2}  —  ↑↓ wheel g G scroll  —  {3}', scroll + 1, Math.min(rowsWide.length, scroll + page), rowsWide.length, SELECT_BANNER));
     this.screen.write('\x1b[2J' + this.grid.diff(null));
     this.prev = null;   // the next real frame repaints everything
   }
@@ -848,13 +857,14 @@ export class App {
     if (k.k === 'paste') { void this.op(this.onPaste(k.text)); return; }   // colagem inteira, antes de qualquer tecla
     if (this.selecting) {
       if (k.k === 'esc' || (k.k === 'char' && (k.c === 's' || k.c === 'S'))) return void this.toggleSelect();
-      if (this.view !== 'agent') return;
+      if (this.view !== 'agent') { if (k.k !== 'mouse' && k.k !== 'motion') this.toggleSelect(); return; }
       const page = Math.max(1, this.screen.H - 3);
       const d = k.k === 'up' ? -1 : k.k === 'down' ? 1 : k.k === 'wheel' ? k.dir * 3
         : k.k === 'char' && k.c === 'k' ? -1 : k.k === 'char' && k.c === 'j' ? 1
         : k.k === 'char' && (k.c === 'b' || k.c === 'u') ? -page : k.k === 'char' && (k.c === ' ' || k.c === 'f') ? page
         : k.k === 'char' && k.c === 'g' ? -1e9 : k.k === 'char' && k.c === 'G' ? 1e9 : 0;
       if (d) this.paintPlain(d);
+      else if (k.k !== 'mouse' && k.k !== 'motion') this.toggleSelect();   // qualquer outra tecla volta: uma tela parada nunca pode parecer travamento
       return;
     }
     if (k.k === 'char' && k.c === 's' && !(this.view === 'agent' && this.composing) && !(this.view === 'browser' && this.typing)) return this.toggleSelect();

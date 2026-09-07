@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Selection mode can no longer pass for a freeze: the frozen frame carries a banner across the top saying what it is, and any key returns to the app instead of being swallowed. The one warning it used to give sat in the status bar and was cut off.
+
 - An agent can assemble its own team. Three bus tools: `agent_create` (name, first request, optional worktree branch, `browser=true`, and names to link) creates the agent already linked to the caller, gives it the briefing of the map and starts its first turn in the background; `browser_create` adds the project browser; `link` joins two nodes by name. The system prompt tells agents this is the only way, never by writing Anthive's files or starting claude themselves, which is exactly what a maestro tried to do when it found no such tool.
 - Fixed: an agent's briefing reply `link: a, b` was never applied, because the app only looked for the old Portuguese `ligar:`.
 
