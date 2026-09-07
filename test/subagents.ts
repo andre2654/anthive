@@ -130,13 +130,14 @@ class F extends Screen { constructor() { super({ mouse: true }); this.W = 130; t
 const app = new App(new F());
 app.project = p; app.pv = await P.view(p); app.view = 'project';
 let stops = 0;
+app.agent = agent as any;   // o chat pertence ao maestro: cada agente tem o seu
 app.chat = { sessionId: sid, busy: true, model: 'claude-x', effort: 'high', permissionMode: '', deep: true, thinking: 0, summary: '', cost: 0, proc: {}, stop: () => { stops++; } } as any;
 app.sel = 'sub-A1';
 await app.openSel();
 const viewNow = (): string => app.view;
-must('opening a subagent watches it without killing the chat that runs it', stops === 0 && !!app.chat && viewNow() === 'agent' && !!app.agent?.name.includes('CVM rules'));
+must('opening a subagent watches it without killing the chat that runs it', stops === 0 && app.chats.size === 1 && viewNow() === 'agent' && !!app.agent?.name.includes('CVM rules'));
 const before = app.evs.length;
-(app as any).onChat({ kind: 'ev', ev: { uuid: 'x', parent: null, sidechain: false, type: 'assistant', ts: 0, role: 'assistant', text: 'from the parent' } });
+(app as any).onChat(agent.id, { kind: 'ev', ev: { uuid: 'x', parent: null, sidechain: false, type: 'assistant', ts: 0, role: 'assistant', text: 'from the parent' } });
 must('the parent chat writes into its own transcript, not the one being watched', app.evs.length === before);
 app.render();
 const w = app.grid.toString();

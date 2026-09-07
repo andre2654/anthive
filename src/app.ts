@@ -15,6 +15,7 @@ import { modeLabel } from './views/item.ts';
 import { renderAgent, rows, Row, INPUT_H, LinkChip, detailWidth, tasksFrom, PanelData, panelFits, inputLayout, SubChip, renderPlain, TREE_TOP, proseWidth, PROSE_MAX, thumbBoxes } from './views/agent.ts';
 import * as P from './core/project.ts';
 import * as A from './core/approvals.ts';
+import { WAKE_PROMPT } from './core/wake.ts';
 import { Pasted, pasteImage, attachFile, droppedPaths, clipboardTypes, hasImage, readB64 } from './core/clip.ts';
 import * as store from './core/store.ts';
 import { ROOT } from './core/store.ts';
@@ -54,7 +55,12 @@ export class App {
   linking: { source: string } | null = null;
   // agente
   agent: P.AgentNode | null = null; evs: Ev[] = []; rowsAll: Row[] = []; aScroll = 0; aCursor = -1; expanded = new Set<string>();
-  chat: ChatSession | null = null; composing = false; chatInput = new TextInput(); prefs = { model: '', effort: '', permissionMode: '' };
+  /** Um chat vivo por agente. Trocar de agente não mata o que está rodando: só muda o que a tela mostra. */
+  chats = new Map<string, ChatSession>();
+  get chat(): ChatSession | null { return this.agent ? this.chats.get(this.agent.id) ?? null : null; }
+  set chat(v: ChatSession | null) { if (!this.agent) return; if (v) this.chats.set(this.agent.id, v); else this.chats.delete(this.agent.id); }
+  private wokeFor = new Map<string, number>();
+  composing = false; chatInput = new TextInput(); prefs = { model: '', effort: '', permissionMode: '' };
   showThinking = false; showPanel = true;
   snoozed = new Set<string>();   // permission requests the user postponed with esc
   deep = false;   // the [deep] chip of the input box: the next turn is a deep search
@@ -86,6 +92,7 @@ export class App {
     if (this.project) {
       this.pv = await P.view(this.project);
       await this.pollApprovals();
+      await this.wakeIdleChats();
       if (this.sel && !this.pv.nodes.some((n) => n.id === this.sel)) this.sel = this.pv.nodes[0]?.id ?? null;
       if (!this.sel) this.sel = this.pv.nodes[0]?.id ?? null;
       await this.applyBriefings();
@@ -489,9 +496,7 @@ export class App {
   async openAgent(n: P.AgentNode) {
     this.agent = n; this.view = 'agent'; this.composing = false;
     if (n.session) await this.loadTranscript(n.session); else { this.evs = []; this.lastLoadedPath = ''; this.rebuild(true); }
-    // watching a subagent is not switching agents: the parent chat (and every subagent inside it) stays alive
-    if (this.watchOnly) return;
-    if (this.chat && this.chat.sessionId !== (n.session ? basename(n.session.path, '.jsonl') : n.item?.sessionId)) this.stopChat();
+    // trocar de agente não mata chat nenhum: cada agente tem o seu no mapa de chats, e segue rodando fora da tela
   }
   private chips(): LinkChip[] {
     if (!this.pv || !this.agent) return [];
@@ -506,7 +511,7 @@ export class App {
   }
   /** A model/effort/permission change asked mid-turn: applied by a restart when the answer arrives. */
   private thumbKey = '';
-  private pendingPatch: (Partial<Pick<ChatSession, 'model' | 'effort' | 'permissionMode'>> & { browser?: boolean }) | null = null;
+  private pendingPatches = new Map<string, Partial<Pick<ChatSession, 'model' | 'effort' | 'permissionMode'>> & { browser?: boolean }>();
   private get live() { const c = this.chat; return c ? { model: c.model, effort: c.effort, permissionMode: c.permissionMode, deep: c.deep, busy: c.busy, thinking: c.thinking, summary: c.summary, cost: c.cost, subs: this.subChips() } : null; }
   /** The subagents of the open agent, as the map read them from their own files. */
   private subChips(): SubChip[] {
@@ -666,6 +671,7 @@ export class App {
 
   async startChat() {
     const a = this.agent; if (!a) return;
+    const aid = a.id;
     if (this.watchOnly) { this.say(t('a subagent: watch only — its parent talks to it'), 4000); return; }
     if (!this.consentOk) { await this.withConsent(() => this.startChat()); return; }
     const browser = !!(this.project && a.item && (await P.agentHasBrowser(this.project.id, a.item.id)));
@@ -688,10 +694,25 @@ export class App {
     const allow = graph && a.item ? P.rulesFor(graph, a.item.name) : [];
     const trusted = !!(graph && a.item && A.isTrusted(graph, a.item.name));
     this.chat = new ChatSession({ cwd: a.cwd, resume: a.session ? sid : undefined, sessionId: a.session ? undefined : sid, agent: a.item?.name, browser, deep: this.deep, allow,
-      model: this.prefs.model || undefined, effort: this.prefs.effort || (this.deep ? DEEP_EFFORT : undefined), permissionMode: this.prefs.permissionMode || (trusted ? 'bypassPermissions' : undefined) }, (e) => this.onChat(e));
+      model: this.prefs.model || undefined, effort: this.prefs.effort || (this.deep ? DEEP_EFFORT : undefined), permissionMode: this.prefs.permissionMode || (trusted ? 'bypassPermissions' : undefined) }, (e) => this.onChat(aid, e));
     this.chat.start();
+    this.wokeFor.set(aid, Date.now());   // mensagens de antes não acordam: só o que chegar daqui em diante
   }
-  stopChat() { this.chat?.stop(); this.chat = null; this.pendingPatch = null; this.composing = false; this.dirty = true; }
+  stopChat() { this.chat?.stop(); this.chat = null; if (this.agent) this.pendingPatches.delete(this.agent.id); this.composing = false; this.dirty = true; }
+  /** Um chat aberto e parado com mensagem nova na caixa recebe um turno para ler: sem isso a conversa morre com o worker calado. */
+  private async wakeIdleChats() {
+    if (!this.pv) return;
+    for (const [aid, c] of this.chats) {
+      if (c.busy || !c.proc) continue;
+      const a = this.pv.nodes.find((n): n is P.AgentNode => n.kind === 'agent' && n.id === aid);
+      if (!a?.item) continue;
+      const items = await bus.inbox(a.name).catch(() => []);
+      const newest = items.reduce((m, i) => Math.max(m, i.ts), 0);
+      if (!newest || newest <= (this.wokeFor.get(aid) ?? 0)) continue;
+      this.wokeFor.set(aid, newest);
+      if (c.send(WAKE_PROMPT)) this.say(t('{0} woke up for a message on the bus', a.name), 4000);
+    }
+  }
   /** Subagents of the open agent that are alive right now, as the map sees them. */
   private liveSubagents(): number { return this.pv?.nodes.filter((n) => n.kind === 'sub' && n.agent === this.agent?.id && !n.sub.done && !n.sub.silent).length ?? 0; }
   /** x: closing a chat mid-turn kills the process, and the subagents with it — so it asks first. */
@@ -705,18 +726,20 @@ export class App {
     ], ok: async () => { this.stopChat(); return t('chat stopped — the turn and its subagents are gone'); } };
     this.dirty = true;
   }
-  private onChat(e: ChatEvent) {
-    if (e.kind === 'ev') { if (this.watchOnly) { this.dirty = true; return; } this.evs.push(e.ev); this.rebuild(true); }   // watching a subagent: the tree on screen is not this chat's
+  private onChat(aid: string, e: ChatEvent) {
+    const c = this.chats.get(aid);
+    if (e.kind === 'ev') { if (this.agent?.id !== aid || this.watchOnly) { this.dirty = true; return; } this.evs.push(e.ev); this.rebuild(true); }   // só a árvore do agente visível recebe; o transcript em disco guarda o resto
     else if (e.kind === 'result') {
       this.screen.write('\x07');
-      if (this.pendingPatch && this.chat && !this.chat.busy) { const patch = this.pendingPatch; this.pendingPatch = null; this.chat.restart(patch); this.say(t('applied now: {0} — same session', Object.entries(patch).map(([k, v]) => (k === 'browser' ? t('browser tools') : `${k} ${v || t('default')}`)).join(', ')), 5000); }
+      const pending = this.pendingPatches.get(aid);
+      if (pending && c && !c.busy) { const patch = pending; this.pendingPatches.delete(aid); c.restart(patch); this.say(t('applied now: {0} — same session', Object.entries(patch).map(([k, v]) => (k === 'browser' ? t('browser tools') : `${k} ${v || t('default')}`)).join(', ')), 5000); }
       const web = e.denials.some((d) => d === 'WebSearch' || d === 'WebFetch');
       const den = e.denials.length ? ` · ${web ? t('denied {0} — D or tab (deep search) allows the web', e.denials.join(', ')) : t('denied {0} — p changes permissions', e.denials.join(', '))}` : '';
-      const note = this.chat?.deep ? /note:\/\/([\w-]+)/.exec(e.text)?.[1] : null;
+      const note = c?.deep ? /note:\/\/([\w-]+)/.exec(e.text)?.[1] : null;
       this.say(`${e.stop || 'ok'}${e.cost ? ` · $${e.cost.toFixed(3)}` : ''}${note ? ` · ${t('report in note://{0}', note)}` : ''}${den}`, den || note ? 8000 : 3000);
     }
     else if (e.kind === 'stderr') this.say(e.text.split('\n')[0] ?? 'erro', 6000);
-    else if (e.kind === 'exit') { if (this.chat && !this.chat.proc) return; this.say(t('chat exited ({0})', e.code), 5000); this.chat = null; this.composing = false; }
+    else if (e.kind === 'exit') { if (c && !c.proc) return; this.say(t('chat exited ({0})', e.code), 5000); this.chats.delete(aid); if (this.agent?.id === aid) this.composing = false; }
     this.dirty = true;
   }
   sendChat() {
@@ -746,9 +769,9 @@ export class App {
 
   /** Restarts the chat with the change now, or after the answer when it is mid-turn (a restart kills the turn and its subagents). Returns true when deferred. */
   private applySetting(patch: Partial<Pick<ChatSession, 'model' | 'effort' | 'permissionMode'>> & { browser?: boolean }): boolean {
-    const c = this.chat; if (!c) return false;
+    const c = this.chat, aid = this.agent?.id; if (!c || !aid) return false;
     if (!c.busy) { c.restart(patch); return false; }
-    this.pendingPatch = { ...this.pendingPatch, ...patch };
+    this.pendingPatches.set(aid, { ...(this.pendingPatches.get(aid) ?? {}), ...patch });
     return true;
   }
   pickSetting(kind: 'model' | 'effort' | 'permissionMode') {
@@ -1057,11 +1080,12 @@ export class App {
   private linksOf(id: string): string[] { return (this.pv?.edges ?? []).filter((e) => e.from === id || e.to === id).map((e) => { const n = this.node(e.from === id ? e.to : e.from); return n ? nodeLabel(n) : '?'; }); }
   private pulsing() { return false; }   // o mapa em árvore não tem fio para pulsar: sem animação, sem redesenho a cada 100 ms
 
-  quit(): never { this.chat?.stop(); this.screen.restore(); process.exit(0); }
+  quit(): never { for (const c of this.chats.values()) c.stop(); this.screen.restore(); process.exit(0); }
   /** q: quitting kills the live chat with its subagents — asks when the agent is mid-turn. */
   askQuit() {
-    if (!this.chat?.busy) return this.quit();
-    const subs = this.liveSubagents(), name = this.agent?.name ?? 'the agent';
+    const busy = [...this.chats.entries()].filter(([, c]) => c.busy).map(([id]) => { const n = this.pv?.nodes.find((x) => x.id === id); return n && n.kind === 'agent' ? n.name : id; });
+    if (!busy.length) return this.quit();
+    const subs = this.liveSubagents(), name = busy.join(', ');
     this.modal = { kind: 'confirm', title: t('{0} is mid-turn — quit anyway?', name), lines: [
       subs ? t('{0} subagent{1} running: the chat dies with Anthive, and their work is lost', subs, subs > 1 ? 's' : '') : t('a tool is still running: the chat dies with Anthive, and this turn is lost'),
       t('esc keeps Anthive open until the answer arrives'),

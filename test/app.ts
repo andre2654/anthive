@@ -214,6 +214,23 @@ press(app, 'esc'); type(app, 'x');
 must('x stops it for the next tests', !app.chat);
 delete process.env.ANTHIVE_NO_CHROME;
 
+// --- switching agents keeps a busy chat alive; coming back finds it ---
+const n0 = argvLines().length;
+type(app, 'i'); await settle();
+must('a chat is up for the switch test', (await waitFor(() => argvLines().length === n0 + 1)) && !!app.chat);
+type(app, 'slow switch'); press(app, 'enter'); await sleep(100);
+const apiChat = app.chat!;
+must('it is busy', apiChat.busy);
+press(app, 'esc'); press(app, 'esc'); await settle();
+must('back on the map, the chat keeps running', app.view === 'project' && apiChat.busy);
+app.sel = db.id; await app.openSel(); await settle();
+must('opening another agent does not kill it: db has no chat, api still runs', app.view === 'agent' && app.agent?.name === 'db' && app.chat === null && apiChat.busy && app.chats.size === 1);
+press(app, 'esc'); await settle(); app.sel = api.id; await app.openSel(); await settle();
+must('coming back finds the same chat', app.chat === apiChat);
+must('and its answer lands there', await waitFor(() => !apiChat.busy, 5000));
+type(app, 'x');
+must('x stops it', !app.chat && app.chats.size === 0);
+
 // --- s gives the mouse back to the terminal, and freezes the frame while you select ---
 type(app, 's');
 must('s freezes the screen and says how to come back', app.selecting && app.status.includes('frozen'));

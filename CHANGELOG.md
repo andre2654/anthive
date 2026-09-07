@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Agents no longer go silent after their first turn. A message on the bus wakes its recipient: when an agent that is not running gets a `send_message`, `thread_post` or `thread_conclude`, Anthive starts a background turn on that agent's own session telling it to read its inbox, act and answer in that turn. One wake per agent per minute, never for an agent that is already running, and the sender's reply says what happened (`db was asleep and is now running a turn to read it`). An agent whose chat is open in the TUI and idle gets the same nudge through its live chat. Before this, four maestro⇄worker threads reached `concluded` with the maestro talking to workers that had stopped after the briefing.
+- Each agent has its own live chat now. Opening another agent no longer kills the chat that was running: it keeps going off screen, its events stay in its own transcript, and coming back finds it where it was. Quitting asks when any of them is mid-turn.
+
 - The map is a tree now, not a circuit board. With five agents and sixteen notes the old map drew 61 routed wires through 46 lanes in a gutter that held 12, spilled lines over the boxes and ran 129 rows deep. Wires are gone: the notes only one agent reads hang under that agent like its subagents, everything shared sits in a dense ledger on the right, one line per note, task, produced folder, file or service, in sections. Relations show on selection, the neighbours of the selected node light up with a `▎` marker, and threads between agents live inside the agent box as `⇄ name 3/6`. The same project fits one screen. The pulse animation is gone with the wires, so the map no longer redraws ten times a second.
 - Produced files of an agent working in a worktree are labelled relative to that worktree, not as absolute paths.
 

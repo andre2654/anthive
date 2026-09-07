@@ -17,6 +17,7 @@ const fakeLog = join(fakeBin, 'argv.log');
 await writeFile(join(fakeBin, 'claude'), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${fakeLog}"\n`, { mode: 0o755 });
 process.env.PATH = `${fakeBin}:${process.env.PATH}`;
 process.env.ANTHIVE_NO_CHROME = '1';
+process.env.ANTHIVE_FAKE_PS = 'claude --resume 99999999-9999-4999-8999-999999999999';   // some other session is alive; none of ours is
 const project = await P.createProject('hive', repo);
 const apiAgent = await P.addAgent(project, 'api'); await P.addAgent(project, 'db');
 const slugDir = join(CP, await P.claudeSlug(apiAgent.cwd)); mkdirSync(slugDir, { recursive: true });
@@ -129,6 +130,19 @@ const brItem = g2.items.find((i) => i.kind === 'browser')!;
 must('link joins two nodes by name', /linked/.test(String(lk[1]?.result?.content?.[0]?.text)) && g2.links.some((l) => (l.from === worker!.id && l.to === brItem.id) || (l.to === worker!.id && l.from === brItem.id)));
 const nope = await session('api', [init, call(34, 'link', { from: 'worker', to: 'nobody-here' })]);
 must('an unknown name is an error, not a silent no-op', nope[1]?.result?.isError === true);
+
+// --- a message wakes an idle recipient with a background turn on its own session ---
+const dbItem = (await P.loadGraph(project.id)).items.find((i) => i.kind === 'agent' && (i as any).name === 'db') as { sessionId: string } | undefined;
+const sent = await session('api', [init, call(40, 'send_message', { to: 'db', goal: 'settle the schema', text: 'db, please confirm the column name' })]);
+const sentText = String(sent[1]?.result?.content?.[0]?.text ?? '');
+const threadId = /Sent in (\S+)\./.exec(sentText)?.[1] ?? '';
+const waitWake = async () => { for (let i = 0; i < 60; i++) { const t = await Bun.file(fakeLog).text().catch(() => ''); if (t.includes(`--resume ${dbItem?.sessionId}`)) return t; await new Promise((r) => setTimeout(r, 50)); } return await Bun.file(fakeLog).text().catch(() => ''); };
+const wl = await waitWake();
+must('the recipient is woken with a resume turn on its session, told to read its inbox', !!dbItem && wl.includes(`--resume ${dbItem.sessionId}`) && wl.includes('Read your inbox'));
+if (threadId) await session('api', [init, call(41, 'thread_post', { id: threadId, text: 'and one more thing' })]);
+await new Promise((r) => setTimeout(r, 400));
+const wl2 = await Bun.file(fakeLog).text().catch(() => '');
+must('a second message inside the cooldown does not wake it twice', wl2.split(`--resume ${dbItem?.sessionId}`).length === 2);
 
 console.log(fails ? `\n${fails} falha(s)` : '\ntudo verde');
 process.exit(fails ? 1 : 0);

@@ -336,9 +336,14 @@ export async function addAgent(p: Project, name: string, opts: { worktree?: stri
  * próprio /init do Claude Code primeiro — verificado em modo -p — e só então o
  * briefing, já com --resume. Função pura para o teste conferir a composição.
  */
+/** O começo de qualquer turno em segundo plano: preâmbulo, barramento, permissões. --allowedTools é variádico e fica ANTES de --session-id/--resume. */
+export function turnArgv(a: AgentItem, browser = false): string[] {
+  void a;
+  return ['claude', '-p', '--append-system-prompt', browser ? `${SYSTEM_PREAMBLE} ${BROWSER_PREAMBLE}` : SYSTEM_PREAMBLE, '--allowedTools', 'mcp__anthive', ...(browser ? ['mcp__playwright'] : []), '--permission-prompt-tool', 'mcp__anthive__permission_prompt'];
+}
+
 export function firstTurnPlan(a: AgentItem, prompt: string, needsInit: boolean, browser = false): string[][] {
-  // --allowedTools é variádico: fica ANTES de --session-id/--resume, que encerram a lista; o prompt vem sempre por último
-  const base = ['claude', '-p', '--append-system-prompt', browser ? `${SYSTEM_PREAMBLE} ${BROWSER_PREAMBLE}` : SYSTEM_PREAMBLE, '--allowedTools', 'mcp__anthive', ...(browser ? ['mcp__playwright'] : []), '--permission-prompt-tool', 'mcp__anthive__permission_prompt'];
+  const base = turnArgv(a, browser);
   if (!needsInit) return [[...base, '--session-id', a.sessionId!, prompt]];
   return [
     [...base, '--session-id', a.sessionId!, '--permission-mode', 'acceptEdits', '/init'],
@@ -346,15 +351,23 @@ export function firstTurnPlan(a: AgentItem, prompt: string, needsInit: boolean, 
   ];
 }
 
-/** Dispara o primeiro turno em segundo plano; devolve o pid do encadeamento. */
-export async function firstTurn(a: AgentItem, prompt: string, browser = false): Promise<number> {
+/** Roda um plano de turnos em segundo plano, num só shell; o prompt vai por variável para não brigar com aspas. `after` roda ao final, aconteça o que acontecer. */
+export function runTurns(a: AgentItem, plan: string[][], prompt: string, after = ''): number {
   const env = { ...process.env as Record<string, string>, ANTHIVE_HOME: ROOT, ANTHIVE_AGENT: a.name };
-  const plan = firstTurnPlan(a, prompt, !(await hasClaudeMd(a.cwd)), browser);
-  // um só processo de shell encadeia os passos; o prompt vai por variável para não brigar com aspas
   const script = plan.map((argv, i) => argv.map((x, j) => (j === argv.length - 1 && i === plan.length - 1) ? '"$ANTHIVE_PROMPT"' : JSON.stringify(x)).join(' ')).join(' && ');
-  const p = Bun.spawn(['sh', '-c', script], { cwd: a.cwd, env: { ...env, ANTHIVE_PROMPT: prompt }, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
+  const p = Bun.spawn(['sh', '-c', after ? `(${script}); ${after}` : script], { cwd: a.cwd, env: { ...env, ANTHIVE_PROMPT: prompt }, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
   p.unref();
   return p.pid;
+}
+
+/** Dispara o primeiro turno em segundo plano; devolve o pid do encadeamento. */
+export async function firstTurn(a: AgentItem, prompt: string, browser = false): Promise<number> {
+  return runTurns(a, firstTurnPlan(a, prompt, !(await hasClaudeMd(a.cwd)), browser), prompt);
+}
+
+/** Um turno a mais numa sessão que já existe, em segundo plano: é assim que um agente parado acorda. */
+export function wakeTurn(a: AgentItem, prompt: string, browser = false, after = ''): number {
+  return runTurns(a, [[...turnArgv(a, browser), '--resume', a.sessionId!, prompt]], prompt, after);
 }
 
 /** Gera o CLAUDE.md de um projeto com o /init do Claude Code, numa sessão nova, em segundo plano. */

@@ -3,6 +3,7 @@
  * O servidor MCP em src/mcp/server.ts é só a casca protocolar disso aqui.
  */
 import { readFile, writeFile } from 'node:fs/promises';
+import { wakeAgent, Woke } from './wake.ts';
 import { join } from 'node:path';
 import * as store from './store.ts';
 import { listProjects, loadGraph } from './project.ts';
@@ -90,7 +91,7 @@ export async function link(a: string, b: string, goal: string, budget = 6): Prom
 }
 
 /** Publica na conversa. Recusa se estourou o teto ou já concluiu. */
-export async function say(threadId: string, author: string, text: string): Promise<{ turn: number; budget: number; state: store.ThreadState }> {
+export async function say(threadId: string, author: string, text: string): Promise<{ turn: number; budget: number; state: store.ThreadState; woke: Record<string, Woke> }> {
   const d = await store.read(threadId, 'thread');
   if (!d) throw new BusError(`conversation "${threadId}" does not exist`);
   if (!d.acl.includes(author)) throw new BusError(`"${author}" is not part of that conversation`);
@@ -101,7 +102,10 @@ export async function say(threadId: string, author: string, text: string): Promi
   }
   await store.post(threadId, author, text);
   const after = store.threadState((await store.read(threadId, 'thread'))!);
-  return after;
+  // quem recebe e está parado acorda para ler; esperado aqui, porque o processo do chamador pode fechar logo depois
+  const woke: Record<string, Woke> = {};
+  for (const other of d.acl.filter((n) => n !== author)) woke[other] = await wakeAgent(other).catch((): Woke => 'unknown');
+  return { ...after, woke };
 }
 
 export async function conclude(threadId: string, author: string, decision: string): Promise<store.Doc> {
@@ -110,6 +114,7 @@ export async function conclude(threadId: string, author: string, decision: strin
   if (!d.acl.includes(author)) throw new BusError(`"${author}" is not part of that conversation`);
   if (store.threadState(d).state === 'concluded') throw new BusError('already concluded');
   await store.post(threadId, author, decision, true);
+  for (const other of d.acl.filter((n) => n !== author)) await wakeAgent(other).catch(() => {});   // a decisão também merece ser lida
   return (await store.read(threadId, 'thread'))!;
 }
 

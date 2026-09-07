@@ -93,7 +93,8 @@ const TOOLS: Tool[] = [
         d = await bus.link(ME(), String(a.to), String(a.goal));
       }
       const st = await bus.say(id, ME(), String(a.text));
-      return `Sent in ${id}. Turn ${st.turn}/${st.budget} · ${st.state}.` +
+      const woke = Object.entries(st.woke).map(([n, w]) => w === 'woken' ? `${n} was asleep and is now running a turn to read it` : w === 'live' ? `${n} is running and will see it` : w === 'cooldown' ? `${n} was already woken a moment ago` : `${n} has no session to wake`).join('; ');
+      return `Sent in ${id}. Turn ${st.turn}/${st.budget} · ${st.state}. ${woke}.` +
         (st.state === 'exhausted' ? ' The conversation is frozen and the user has to decide.' : '');
     },
   },
@@ -125,7 +126,8 @@ const TOOLS: Tool[] = [
     schema: obj({ id: str('conversation id'), text: str('what you want to say') }, ['id', 'text']),
     async run(a) {
       const st = await bus.say(String(a.id), ME(), String(a.text));
-      return `Turn ${st.turn}/${st.budget} · ${st.state}.`;
+      const woke = Object.entries(st.woke).map(([n, w]) => w === 'woken' ? `${n} woken to read it` : w === 'live' ? `${n} is running` : w === 'cooldown' ? `${n} already woken` : `${n} cannot be woken`).join('; ');
+      return `Turn ${st.turn}/${st.budget} · ${st.state}. ${woke}.`;
     },
   },
   {

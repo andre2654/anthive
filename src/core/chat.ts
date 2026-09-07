@@ -22,6 +22,7 @@ export const SYSTEM_PREAMBLE = [
   'In this environment, notes, links, agent-to-agent conversations and the project map are the MCP tools of the "anthive" server:',
   'agent_create (creates an agent with its first request and starts it: this is how you assemble a team; never write Anthive files or start claude yourself), browser_create, link (agents, notes, files or the browser, by name), note_write (creates a note already linked to you), note_read, notes_list, project_map, project_search (searches the notes, the conversations and the transcripts of the agents of your project), send_message, inbox, thread_read, thread_post, thread_conclude, agents_list.',
   'When the user asks you to create a note, link to something, see the project or talk to another agent, use these tools.',
+  'When a message arrives for you on the bus and you are not running, Anthive wakes you with a turn: read your inbox, act, answer with thread_post, and finish inside that turn.',
   'Do not use skills or CLIs from other agent canvases for this — they are not active in this session.',
   'Subagents (the Agent tool) must always run with run_in_background: false: this session can be restarted at any time and background agents die with the process, with nothing delivered. If a notification says background agents were stopped or lost, do not try to resume them with SendMessage — say plainly that the work did not happen and redo it synchronously.',
 ].join(' ');
