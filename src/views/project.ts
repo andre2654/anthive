@@ -73,7 +73,7 @@ const ownerOf = (n: NoteNode, agents: AgentNode[]): AgentNode | null => (n.doc.a
 
 function ledgerRow(n: Node, v: View, home: string): LedgerRow | null {
   const agents = v.nodes.filter((m): m is AgentNode => m.kind === 'agent');
-  if (n.kind === 'note') return { text: `${G.note} ${n.doc.title}`, meta: `${n.doc.ttl ? t('ephemeral') + ' · ' : ''}${n.doc.acl.length ? t('read by {0}', n.doc.acl.join(', ')) : t('nobody reads it')}`, color: C.link };
+  if (n.kind === 'note') { const who = n.doc.acl.length > 2 ? `${n.doc.acl.slice(0, 2).join(', ')} +${n.doc.acl.length - 2}` : n.doc.acl.join(', '); return { text: `${G.note} ${n.doc.title}`, meta: `${n.doc.ttl ? t('ephemeral') + ' · ' : ''}${n.doc.acl.length ? t('read by {0}', who) : t('nobody reads it')}`, color: C.link }; }
   if (n.kind === 'task') return { text: `${n.task.status === 'completed' ? G.running : n.task.status === 'in_progress' ? G.focus : G.idle} ${n.task.subject}`, meta: `${n.task.status === 'completed' ? t('done') : n.task.status === 'in_progress' ? t('in progress') : t('pending')}${(() => { const a = agents.find((x) => x.id === n.agent); return a ? ` · ${a.name}` : ''; })()}`, color: n.task.status === 'completed' ? C.run : n.task.status === 'in_progress' ? C.hold : C.dim };
   if (n.kind === 'browser') { const st = n.state; return { text: st.busy ? `${G.running} ${browserShort(st.lastTool ?? 'browser_')}…` : `▣ chrome (${modeLabel(n.item.mode)})${st.live ? ` ${G.running} ${t('live')}` : ''}  ${G.h}  ${st.title || t('no page yet')}`, meta: '', color: st.busy ? C.hold : st.url ? C.run : C.dim, second: st.url || t('link an agent (l) and ask it to browse') }; }
   if (n.kind === 'wrote') { const a = agents.find((x) => x.id === n.agent); return { text: `${n.group.length ? '▦' : '▥'} ${n.label}`, meta: n.group.length ? `${t('{0} files', n.group.length)} · ${a?.name ?? t('seen')}` : `${a?.name ?? t('seen')} · ${ago(Date.now() - n.ts)}`, color: n.how === 'seen' ? C.dim : C.ink }; }
@@ -150,18 +150,27 @@ function agentBox(g: Grid, v: View, n: AgentNode, r: Rect, on: boolean, src: boo
   const branch = n.item?.worktree ?? (s?.branch && s.branch !== 'HEAD' ? s.branch : '');
   const doing = s?.lastText.replace(/^(\w+ )?cd \S+\s*(&&\s*)?/, '$1') ?? '';
   const inflight = s?.state === 'running' && s.pendingTool ? `${G.tool} ${s.pendingTool}${s.pendingInput ? ' ' + s.pendingInput : ''}` : '';
-  const l2 = s?.state === 'waiting' || s?.state === 'stuck' ? `${G.pause} ${s.pendingTool ?? '?'}` : inflight || branch || doing || (n.item ? t('no session — ↵ opens the chat') : '');
-  g.put(r.x + 2, r.y + 2, pad(l2, inner), s?.state === 'waiting' ? C.hold : inflight ? C.dim : branch ? C.link : C.frame);
+  const l2 = s?.state === 'waiting' || s?.state === 'stuck' ? `${G.pause} ${s.pendingTool ?? '?'}` : inflight || doing || (n.item ? t('no session — ↵ opens the chat') : '');
+  g.put(r.x + 2, r.y + 2, pad(l2, inner), s?.state === 'waiting' ? C.hold : inflight ? C.dim : doing ? C.ink : C.frame);   // a história do agente, legível
   // conversas com outros agentes e o que está ligado, numa linha: era isso que os fios tentavam dizer
   const talks = v.edges.filter((e) => e.kind === 'talk' && (e.from === n.id || e.to === n.id)).map((e) => {
     const o = v.nodes.find((m) => m.id === (e.from === n.id ? e.to : e.from)); const st = e.thread ? threadState(e.thread) : null;
-    return `${G.swap} ${o && o.kind === 'agent' ? o.name : '?'}${st ? ` ${st.turn}/${st.budget}` : ''}`;
+    const who = o && o.kind === 'agent' ? o.name : '?';
+    if (!st) return { text: `${G.swap} ${who}`, color: C.link };
+    if (st.state === 'concluded') return { text: `${G.swap} ${who} ${G.running}`, color: C.frame };
+    if (st.state === 'exhausted') return { text: `${G.swap} ${who} ${st.turn}/${st.budget} ${G.pause}`, color: C.hold };
+    return { text: `${G.swap} ${who} ${st.turn}/${st.budget}`, color: C.link };
   });
   const counts: string[] = [];
   const near = neighbours(v, n.id);
   const kinds = [...near].map((id) => v.nodes.find((m) => m.id === id)?.kind).filter(Boolean) as Node['kind'][];
   for (const [k, glyph] of [['note', G.note], ['wrote', '▦'], ['file', '▤'], ['browser', '▣'], ['service', '◎']] as const) { const c = kinds.filter((x) => x === k).length; if (c) counts.push(`${glyph} ${c}`); }
-  g.put(r.x + 2, r.y + 3, pad([...talks, ...counts].join('  '), inner), talks.length ? C.link : C.frame);
+  {
+    let x = r.x + 2;
+    const segs = [...talks, ...counts.map((c) => ({ text: c, color: C.frame }))];
+    g.put(x, r.y + 3, pad('', inner), C.frame);
+    for (const sg of segs) { const w = [...sg.text].length; if (x + w > r.x + 2 + inner) { g.put(x, r.y + 3, G.ell, C.frame); break; } g.put(x, r.y + 3, sg.text, sg.color); x += w + 2; }
+  }
   if (r.h >= AGENT_TALL) {
     const recent = (s?.recent ?? []).slice(-3).map((x) => x.split(' ')[0]).join(' · ');
     g.put(r.x + 2, r.y + 4, pad(recent ? `${G.tool} ${recent}` : '', inner), C.frame);
@@ -173,7 +182,8 @@ function agentBox(g: Grid, v: View, n: AgentNode, r: Rect, on: boolean, src: boo
   const win = s ? windowOf(s.model, s.context) : 0;
   const ctx = s?.context ? `${gauge(s.context / win, 6)} ${Math.round((100 * s.context) / win)}%` : '';
   const sw = Math.max(4, inner - (ctx ? [...ctx].length + 2 : 0));
-  g.put(r.x + 2, gy, sparkline(s?.spark ?? [], sw), SPARK[state]);
+  if (state === 'running' || state === 'waiting') g.put(r.x + 2, gy, sparkline(s?.spark ?? [], sw), SPARK[state]);
+  else g.put(r.x + 2, gy, pad(branch, sw), C.linkDim);   // parado, a atividade não diz nada; o branch diz onde ele trabalha
   if (ctx) g.put(r.x + 2 + sw, gy, padStart(ctx, [...ctx].length + 2), s!.context / win > 0.85 ? C.hold : C.frame);
   g.hit(n.id, r);
 }
@@ -204,7 +214,7 @@ function subBox(g: Grid, n: SubNode, r: Rect, on: boolean, src: boolean) {
 function hangRow(g: Grid, n: NoteNode, r: Rect, on: boolean, lit: boolean, last: boolean) {
   if (on) g.fill({ x: r.x - SUB_INDENT + 1, y: r.y, w: r.w + SUB_INDENT - 1, h: 1 }, BG.sel);
   g.put(r.x - 2, r.y, last ? G.branchEnd : G.branchMid, C.frame);
-  g.put(r.x + 1, r.y, fit(`${G.note} ${n.doc.title}${n.doc.ttl ? `  ${G.h}  ${t('ephemeral')}` : ''}`, r.w - 1), on || lit ? C.link : C.linkDim);
+  g.put(r.x + 1, r.y, fit(`${G.note} ${n.doc.title}${n.doc.ttl ? `  ${G.h}  ${t('ephemeral')}` : ''}`, r.w - 1), on || lit ? C.inkHi : C.link);
   g.hit(n.id, r);
 }
 
@@ -215,8 +225,8 @@ function ledgerLine(g: Grid, b: ProjectLayout['boxes'][number], on: boolean, src
   if (lit && !on) g.fill({ x: r.x - 1, y: r.y, w: r.w + 1, h: 1 }, BG.sel);
   if (lit || on) g.put(r.x - 1, r.y, '▎', src ? C.hold : C.link);
   const mw = Math.min(Math.floor(r.w / 2), [...row.meta].length);
-  g.put(r.x + 1, r.y, fit(row.text, Math.max(4, r.w - mw - 3)), on ? C.inkHi : lit ? row.color : (row.color === C.dim ? C.frame : C.dim));
-  if (mw) g.put(r.x + r.w - mw, r.y, fit(row.meta, mw), on || lit ? C.ink : C.frame);
+  g.put(r.x + 1, r.y, fit(row.text, Math.max(4, r.w - mw - 3)), on || lit ? C.inkHi : row.color);
+  if (mw) g.put(r.x + r.w - mw, r.y, fit(row.meta, mw), on || lit ? C.ink : C.dim);
   if (row.second) g.put(r.x + 1, r.y + 1, fit(row.second, r.w - 2), C.frame);
   g.hit(b.id, r);
 }
@@ -242,6 +252,8 @@ function drawNodePanel(g: Grid, v: View, n: Node, top: number, bottom: number) {
     const s = n.session;
     if (!s) { row(t('state'), t('no session'), C.dim); }
     else {
+      y++; head(t('said last')); text(s.lastText.replace(/^(\w+ )?cd \S+\s*(&&\s*)?/, '$1') || t('nothing yet'), C.ink, 5);
+      y++; head(t('session'));
       row(t('up'), ago(Date.now() - (s.started || s.mtime)));
       row(t('model'), s.model || '—');
       row('branch', n.item?.worktree ?? s.branch);
@@ -310,9 +322,11 @@ function drawNodePanel(g: Grid, v: View, n: Node, top: number, bottom: number) {
     row('pid', String(n.item.pid));
     row(t('where'), n.item.cwd.replace(home, '~') || '—');
   }
-  y++; head(`${t('links')}${links.length ? ` (${links.length})` : ''}`);
-  if (!links.length) row('', t('none — l links'), C.dim);
-  for (const m of links.slice(0, 6)) row('', `${m.kind === 'agent' ? G.swap : KIND_GLYPH[m.kind]} ${nodeName(m)}`, m.kind === 'agent' || m.kind === 'note' ? C.link : C.ink);
+  if (n.kind !== 'agent') {   // para o agente o mapa já acende as ligações; a lista aqui só repetia
+    y++; head(`${t('links')}${links.length ? ` (${links.length})` : ''}`);
+    if (!links.length) row('', t('none — l links'), C.dim);
+    for (const m of links.slice(0, 6)) row('', `${m.kind === 'agent' ? G.swap : KIND_GLYPH[m.kind]} ${nodeName(m)}`, m.kind === 'agent' || m.kind === 'note' ? C.link : C.ink);
+  }
   if (y <= bottom) g.put(x, bottom, fit(`${t('↵ opens')}  ${G.h}  ${t('] hides the panel')}`, w), C.frame);
 }
 

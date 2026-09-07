@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The map tells the story again. An agent box's second line is what the agent last said or did, in full ink; the branch moves to the last line, where the activity sparkline only appears while it is running. Conversations show their state: `⇄ aw-727 ●` concluded, `⇄ aw-727 3/6` open, `⇄ aw-727 6/6 ‖` exhausted in amber. Selecting a node lights what is linked to it without greying out everything else, hanging notes are readable, long reader lists fold to `maestro, aw-465 +4`, and the agent panel shows what it said last instead of a link list the map already lights.
+
 - Agents no longer go silent after their first turn. A message on the bus wakes its recipient: when an agent that is not running gets a `send_message`, `thread_post` or `thread_conclude`, Anthive starts a background turn on that agent's own session telling it to read its inbox, act and answer in that turn. One wake per agent per minute, never for an agent that is already running, and the sender's reply says what happened (`db was asleep and is now running a turn to read it`). An agent whose chat is open in the TUI and idle gets the same nudge through its live chat. Before this, four maestro⇄worker threads reached `concluded` with the maestro talking to workers that had stopped after the briefing.
 - Each agent has its own live chat now. Opening another agent no longer kills the chat that was running: it keeps going off screen, its events stay in its own transcript, and coming back finds it where it was. Quitting asks when any of them is mid-turn.
 
