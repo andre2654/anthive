@@ -20,9 +20,10 @@ const WAKES = () => join(ROOT, 'wakes');
 const COOLDOWN = 60_000;
 
 /** O agente registrado com esse nome, em qualquer projeto; o mais recente ganha em caso de empate. */
-export async function agentByName(name: string): Promise<{ project: string; item: AgentItem } | null> {
+export async function agentByName(name: string, project = ''): Promise<{ project: string; item: AgentItem } | null> {
   let best: { project: string; item: AgentItem } | null = null;
   for (const p of await listProjects()) {
+    if (project && p.id !== project) continue;   // nome é único dentro do projeto, nunca fora dele
     const g = await loadGraph(p.id);
     const it = g.items.find((i): i is AgentItem => i.kind === 'agent' && i.name === name && !!i.sessionId);
     if (it && (!best || it.created > best.item.created)) best = { project: p.id, item: it };
@@ -33,18 +34,18 @@ export async function agentByName(name: string): Promise<{ project: string; item
 export type Woke = 'woken' | 'live' | 'cooldown' | 'unknown';
 
 /** Acorda `name` para a mensagem mais nova (`newest`, epoch ms). Diz o que fez. */
-export async function wakeAgent(name: string, newest = Date.now()): Promise<Woke> {
-  const found = await agentByName(name);
+export async function wakeAgent(name: string, newest = Date.now(), project = ''): Promise<Woke> {
+  const found = await agentByName(name, project);
   if (!found) return 'unknown';
-  const { project, item } = found;
+  const { project: pid, item } = found;
   if (!(await sessionGone(item.sessionId!))) return 'live';
   await mkdir(WAKES(), { recursive: true });
-  const marker = join(WAKES(), `${name}.json`);
+  const marker = join(WAKES(), `${pid}-${name}.json`);
   const prev = await readFile(marker, 'utf8').then((t) => JSON.parse(t) as { ts: number; for: number }, () => null);
   if (prev && (Date.now() - prev.ts < COOLDOWN || prev.for >= newest)) return 'cooldown';
   await writeFile(marker, JSON.stringify({ ts: Date.now(), for: newest }));
-  const browser = await agentHasBrowser(project, item.id).catch(() => false);
-  wakeTurn(item, WAKE_PROMPT, browser, `rm -f ${JSON.stringify(marker)}`);
+  const browser = await agentHasBrowser(pid, item.id).catch(() => false);
+  wakeTurn(item, WAKE_PROMPT, browser, `rm -f ${JSON.stringify(marker)}`, pid);
   return 'woken';
 }
 

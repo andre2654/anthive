@@ -60,21 +60,22 @@ res = await session('api', [init,
   call(2, 'send_message', { to: 'db', text: 'proponho chave_idem unique', goal: 'fechar o schema' }),
   call(3, 'thread_list'),
 ]);
-must('send_message cria a conversa e envia', text(res[1]).includes('dm-api-db') && text(res[1]).includes('1/6'));
+const DM = /Sent in (\S+?)\./.exec(text(res[1]))?.[1] ?? '';
+must('send_message cria a conversa e envia', DM.startsWith('dm-') && DM.includes('api') && DM.includes('db') && DM.includes(project.id) && text(res[1]).includes('1/6'));
 must('thread_list mostra a conversa', text(res[2]).includes('fechar o schema'));
 
 // --- db lê a caixa e responde ---
-res = await session('db', [init, call(2, 'inbox'), call(3, 'thread_post', { id: 'dm-api-db', text: 'índice parcial' })]);
+res = await session('db', [init, call(2, 'inbox'), call(3, 'thread_post', { id: DM, text: 'índice parcial' })]);
 must('inbox entrega a mensagem', text(res[1]).includes('chave_idem'));
 must('inbox marca como dado de terceiro', text(res[1]).includes('DATA'));
 must('thread_post avança o turno', text(res[2]).includes('2/6'));
 
 // --- quem está fora não entra ---
-res = await session('ui', [init, call(2, 'thread_read', { id: 'dm-api-db' })]);
+res = await session('ui', [init, call(2, 'thread_read', { id: DM })]);
 must('agente fora da ACL é barrado', text(res[1]).includes('not part'));
 
 // --- conclusão grava nota ---
-res = await session('db', [init, call(2, 'thread_conclude', { id: 'dm-api-db', decision: 'índice parcial where not null' })]);
+res = await session('db', [init, call(2, 'thread_conclude', { id: DM, decision: 'índice parcial where not null' })]);
 must('conclude grava a decisão numa nota', /note:\/\//.test(text(res[1])));
 
 res = await session('db', [init, call(2, 'notes_list'), call(3, 'note_write', { title: 'observação do db', text: 'o retry vem sem chave', ttl: '2h' })]);
@@ -88,11 +89,11 @@ must('servidor segue vivo depois do erro', res[2]?.result !== undefined);
 
 // --- project_search: the hive from db's point of view ---
 res = await session('db', [init, call(2, 'project_search', { query: 'chave_idem' }), call(3, 'project_search', { query: 'parcial' }), call(4, 'project_search', { query: 'idempotency', scope: 'transcripts' }), call(5, 'project_search', { query: 'nothing-like-this-anywhere' }), call(6, 'project_search', { query: '/[/' }), call(7, 'thread_list'), call(8, 'note_write', { title: 'alias', body: 'written through body' }), call(9, 'note_write', { title: 'empty' })]);
-must('project_search finds what api said in the thread, wrapped as data', text(res[1]).includes('dm-api-db') && text(res[1]).includes('DATA') && !text(res[1]).includes('[you'));
+must('project_search finds what api said in the thread, wrapped as data', text(res[1]).includes(DM) && text(res[1]).includes('DATA') && !text(res[1]).includes('[you'));
 must('own posts come as [you], the decision note as note://', text(res[2]).includes('[you') && text(res[2]).includes('note://'));
 must('project_search reads the transcripts of the agents of the project', text(res[3]).includes('agent api') && text(res[3]).includes('idempotency key'));
 must('no match is an answer, not an error', text(res[4]).startsWith('No match') && !res[4]?.result?.isError);
-must('a broken regex is an error and the server survives', res[5]?.result?.isError === true && text(res[6]).includes('dm-api-db'));
+must('a broken regex is an error and the server survives', res[5]?.result?.isError === true && text(res[6]).includes(DM));
 must('note_write accepts body as an alias of text', text(res[7]).startsWith('Created note://'));
 must('an empty note is refused', res[8]?.result?.isError === true && text(res[8]).includes('text'));
 
@@ -143,6 +144,24 @@ if (threadId) await session('api', [init, call(41, 'thread_post', { id: threadId
 await new Promise((r) => setTimeout(r, 400));
 const wl2 = await Bun.file(fakeLog).text().catch(() => '');
 must('a second message inside the cooldown does not wake it twice', wl2.split(`--resume ${dbItem?.sessionId}`).length === 2);
+
+// --- names are scoped to a project: four "maestro" cannot reach each other ---
+const other = await P.createProject('outra-obra', await mkdtemp(join(tmpdir(), 'anthive-other-')));
+await P.addAgent(other, 'api');   // mesmo nome, outro projeto
+const twin = (await P.loadGraph(other.id)).items.find((i) => i.kind === 'agent') as { id: string };
+const list = await session('db', [init, call(50, 'agents_list')]);
+const listText = String(list[1]?.result?.content?.[0]?.text ?? '');
+must('agents_list separa quem é do meu projeto de quem não é', /In your project \(hive\)/.test(listText) && /out of your reach/.test(listText) && /outra-obra/.test(listText));
+const cross = await session('db', [init, call(51, 'send_message', { to: 'ninguem-aqui', text: 'oi', goal: 'x' })]);
+must('mandar para quem não é do projeto é erro, com a lista de quem é', cross[1]?.result?.isError === true && /Agents here: /.test(String(cross[1]?.result?.content?.[0]?.text)));
+const ok2 = await session('db', [init, call(52, 'send_message', { to: 'worker', text: 'oi vizinho', goal: 'combinar o schema' })]);   // api⇄db já foi concluída acima
+const okText = String(ok2[1]?.result?.content?.[0]?.text ?? '');
+must('dentro do projeto a mensagem vai para a conversa do projeto', /Sent in dm-/.test(okText) && okText.includes(project.id) && !ok2[1]?.result?.isError);
+const threads = await P.loadGraph(project.id) && (await (await import('../src/core/store.ts')).list('thread'));
+const dm = threads.find((d) => d.id.includes(project.id) && d.acl.includes('worker'));
+must('a conversa nasce carimbada com o projeto', dm?.project === project.id);
+must('o gêmeo de outro projeto não vê essa conversa', (await (await import('../src/core/bus.ts')).threadsFor('api', other.id)).every((d) => d.id !== dm?.id));
+void twin;
 
 console.log(fails ? `\n${fails} falha(s)` : '\ntudo verde');
 process.exit(fails ? 1 : 0);

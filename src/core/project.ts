@@ -352,8 +352,8 @@ export function firstTurnPlan(a: AgentItem, prompt: string, needsInit: boolean, 
 }
 
 /** Roda um plano de turnos em segundo plano, num só shell; o prompt vai por variável para não brigar com aspas. `after` roda ao final, aconteça o que acontecer. */
-export function runTurns(a: AgentItem, plan: string[][], prompt: string, after = ''): number {
-  const env = { ...process.env as Record<string, string>, ANTHIVE_HOME: ROOT, ANTHIVE_AGENT: a.name };
+export function runTurns(a: AgentItem, plan: string[][], prompt: string, after = '', project = ''): number {
+  const env = { ...process.env as Record<string, string>, ANTHIVE_HOME: ROOT, ANTHIVE_AGENT: a.name, ...(project ? { ANTHIVE_PROJECT: project } : {}) };
   const script = plan.map((argv, i) => argv.map((x, j) => (j === argv.length - 1 && i === plan.length - 1) ? '"$ANTHIVE_PROMPT"' : JSON.stringify(x)).join(' ')).join(' && ');
   const p = Bun.spawn(['sh', '-c', after ? `(${script}); ${after}` : script], { cwd: a.cwd, env: { ...env, ANTHIVE_PROMPT: prompt }, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
   p.unref();
@@ -361,13 +361,13 @@ export function runTurns(a: AgentItem, plan: string[][], prompt: string, after =
 }
 
 /** Dispara o primeiro turno em segundo plano; devolve o pid do encadeamento. */
-export async function firstTurn(a: AgentItem, prompt: string, browser = false): Promise<number> {
-  return runTurns(a, firstTurnPlan(a, prompt, !(await hasClaudeMd(a.cwd)), browser), prompt);
+export async function firstTurn(a: AgentItem, prompt: string, browser = false, project = ''): Promise<number> {
+  return runTurns(a, firstTurnPlan(a, prompt, !(await hasClaudeMd(a.cwd)), browser), prompt, '', project);
 }
 
 /** Um turno a mais numa sessão que já existe, em segundo plano: é assim que um agente parado acorda. */
-export function wakeTurn(a: AgentItem, prompt: string, browser = false, after = ''): number {
-  return runTurns(a, [[...turnArgv(a, browser), '--resume', a.sessionId!, prompt]], prompt, after);
+export function wakeTurn(a: AgentItem, prompt: string, browser = false, after = '', project = ''): number {
+  return runTurns(a, [[...turnArgv(a, browser), '--resume', a.sessionId!, prompt]], prompt, after, project);
 }
 
 /** Gera o CLAUDE.md de um projeto com o /init do Claude Code, numa sessão nova, em segundo plano. */

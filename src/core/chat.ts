@@ -70,6 +70,7 @@ export interface ChatOpts {
   effort?: string;
   permissionMode?: string;
   agent?: string;          // nome no barramento, vira ANTHIVE_AGENT
+  project?: string;        // id do projeto dono, vira ANTHIVE_PROJECT: o nome sozinho colide entre projetos
   browser?: boolean;       // ligado a um browser do projeto: autoriza mcp__playwright e instrui
   deep?: boolean;          // deep search: web tools, subagent progress and the research protocol
   allow?: string[];        // remembered rules of this agent, as Claude Code patterns (Bash(prefix:*))
@@ -154,6 +155,7 @@ export class ChatSession {
   start() {
     const env: Record<string, string> = { ...process.env as Record<string, string>, ANTHIVE_HOME: ROOT, MCP_TOOL_TIMEOUT: process.env.MCP_TOOL_TIMEOUT ?? '900000' };   // a permission request may wait for the user
     if (this.opts.agent) env.ANTHIVE_AGENT = this.opts.agent;
+    if (this.opts.project) env.ANTHIVE_PROJECT = this.opts.project;
     const proc = Bun.spawn(this.argv(), {
       cwd: this.opts.cwd, env, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe',
     });

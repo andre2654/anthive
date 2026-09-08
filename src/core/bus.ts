@@ -36,18 +36,26 @@ export function untrusted(author: string, text: string): string {
   ].join('\n');
 }
 
-export const dmId = (a: string, b: string) => `dm-${[a, b].sort().join('-')}`;
+/**
+ * O id de uma conversa direta. Leva o projeto porque o nome sozinho colide:
+ * quatro projetos podem ter um "maestro", e uma mensagem para "maestro" caía
+ * no projeto errado. Ids antigos, sem projeto, seguem legíveis.
+ */
+export const dmId = (a: string, b: string, project = '') => `dm-${project ? `${project}-` : ''}${[a, b].sort().join('-')}`;
 
-/** Threads que este agente participa (ACL). */
-export async function threadsFor(agent: string): Promise<store.Doc[]> {
+/** Do meu projeto, ou de nenhum (as antigas, de antes do escopo). */
+const inScope = (d: store.Doc, project: string) => !project || !d.project || d.project === project;
+
+/** Threads que este agente participa (ACL), dentro do projeto dele. */
+export async function threadsFor(agent: string, project = ''): Promise<store.Doc[]> {
   const all = await store.list('thread');
-  return all.filter((d) => d.acl.includes(agent) && !store.isExpired(d));
+  return all.filter((d) => d.acl.includes(agent) && inScope(d, project) && !store.isExpired(d));
 }
 
-/** Notas que este agente pode ler. */
-export async function notesFor(agent: string): Promise<store.Doc[]> {
+/** Notas que este agente pode ler, dentro do projeto dele. */
+export async function notesFor(agent: string, project = ''): Promise<store.Doc[]> {
   const all = await store.list('note');
-  return all.filter((d) => d.acl.includes(agent) && !store.isExpired(d));
+  return all.filter((d) => d.acl.includes(agent) && inScope(d, project) && !store.isExpired(d));
 }
 
 export interface InboxItem {
@@ -56,11 +64,11 @@ export interface InboxItem {
 }
 
 /** Posts que este agente ainda não viu, em todas as conversas dele. */
-export async function inbox(agent: string): Promise<InboxItem[]> {
+export async function inbox(agent: string, project = ''): Promise<InboxItem[]> {
   const cs = await cursors();
   const mine = cs[agent] ?? {};
   const out: InboxItem[] = [];
-  for (const d of await threadsFor(agent)) {
+  for (const d of await threadsFor(agent, project)) {
     const seen = mine[d.id] ?? 0;
     const st = store.threadState(d);
     for (const p of store.posts(d)) {
@@ -72,22 +80,22 @@ export async function inbox(agent: string): Promise<InboxItem[]> {
   return out.sort((a, b) => a.ts - b.ts);
 }
 
-export async function markRead(agent: string) {
+export async function markRead(agent: string, project = '') {
   const cs = await cursors();
   cs[agent] ??= {};
-  for (const d of await threadsFor(agent)) cs[agent]![d.id] = Date.now();
+  for (const d of await threadsFor(agent, project)) cs[agent]![d.id] = Date.now();
   await saveCursors(cs);
 }
 
 export class BusError extends Error {}
 
 /** Abre uma conversa. Objetivo e teto de turnos são obrigatórios por design. */
-export async function link(a: string, b: string, goal: string, budget = 6): Promise<store.Doc> {
+export async function link(a: string, b: string, goal: string, budget = 6, project = ''): Promise<store.Doc> {
   if (!goal.trim()) throw new BusError('a conversation needs a goal — without one the two never stop');
-  const id = dmId(a, b);
+  const id = dmId(a, b, project);
   const existing = await store.read(id, 'thread');
   if (existing && store.threadState(existing).state === 'open') return existing;
-  return store.create({ kind: 'thread', id, title: `${a} ${'⇄'} ${b}`, goal, budget, acl: [a, b] });
+  return store.create({ kind: 'thread', id, project: project || undefined, title: `${a} ${'⇄'} ${b}`, goal, budget, acl: [a, b] });
 }
 
 /** Publica na conversa. Recusa se estourou o teto ou já concluiu. */
@@ -104,7 +112,7 @@ export async function say(threadId: string, author: string, text: string): Promi
   const after = store.threadState((await store.read(threadId, 'thread'))!);
   // quem recebe e está parado acorda para ler; esperado aqui, porque o processo do chamador pode fechar logo depois
   const woke: Record<string, Woke> = {};
-  for (const other of d.acl.filter((n) => n !== author)) woke[other] = await wakeAgent(other).catch((): Woke => 'unknown');
+  for (const other of d.acl.filter((n) => n !== author)) woke[other] = await wakeAgent(other, Date.now(), d.project).catch((): Woke => 'unknown');
   return { ...after, woke };
 }
 
@@ -114,7 +122,7 @@ export async function conclude(threadId: string, author: string, decision: strin
   if (!d.acl.includes(author)) throw new BusError(`"${author}" is not part of that conversation`);
   if (store.threadState(d).state === 'concluded') throw new BusError('already concluded');
   await store.post(threadId, author, decision, true);
-  for (const other of d.acl.filter((n) => n !== author)) await wakeAgent(other).catch(() => {});   // a decisão também merece ser lida
+  for (const other of d.acl.filter((n) => n !== author)) await wakeAgent(other, Date.now(), d.project).catch(() => {});   // a decisão também merece ser lida
   return (await store.read(threadId, 'thread'))!;
 }
 
@@ -125,11 +133,11 @@ export async function extend(threadId: string, by: number): Promise<store.Doc | 
   return store.update(d, { budget: (d.budget ?? 6) + by });
 }
 
-export async function roster(): Promise<{ name: string; cwd: string; worktree: string | null; project: string }[]> {
-  const out: { name: string; cwd: string; worktree: string | null; project: string }[] = [];
+export async function roster(project = ''): Promise<{ name: string; cwd: string; worktree: string | null; project: string; mine: boolean }[]> {
+  const out: { name: string; cwd: string; worktree: string | null; project: string; mine: boolean }[] = [];
   for (const p of await listProjects()) {
     const g = await loadGraph(p.id);
-    for (const it of g.items) if (it.kind === 'agent') out.push({ name: it.name, cwd: it.cwd, worktree: it.worktree, project: p.name });
+    for (const it of g.items) if (it.kind === 'agent') out.push({ name: it.name, cwd: it.cwd, worktree: it.worktree, project: p.name, mine: !project || p.id === project });
   }
   return out;
 }

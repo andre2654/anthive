@@ -342,7 +342,7 @@ export class App {
           if (bus !== 'unchanged') this.say(t('bus {0} in {1}/.mcp.json', bus === 'new' ? t('new') : t('updated'), it.cwd.replace(process.env.HOME ?? '', '~')), 5000);
           if (prompt) {
             const briefing = P.buildBriefing(this.pv!, it.name, prompt);
-            await P.firstTurn(it, briefing);
+            await P.firstTurn(it, briefing, false, p.id);
             const g = await P.loadGraph(p.id); const stored = g.items.find((x) => x.id === it.id); if (stored) { (stored as any).briefingPending = true; await P.saveGraph(p.id, g); }
           }
           await this.load(); this.sel = it.id; this.ensureVisible();
@@ -424,10 +424,10 @@ export class App {
     if (a.kind === 'agent' && b.kind === 'agent') {
       if (!goal) {
         this.inline = { label: `${G.swap} ${a.name} ${G.swap} ${b.name} ${G.h} ${t('goal')}`, input: new TextInput(),
-          submit: async (g) => { const d = await bus.link(a.name, b.name, g.trim()); await this.load(); return `${d.id} aberta`; } };
+          submit: async (g) => { const d = await bus.link(a.name, b.name, g.trim(), 6, this.project?.id); await this.load(); return `${d.id} aberta`; } };
         this.dirty = true; return '';
       }
-      await bus.link(a.name, b.name, goal); return `${a.name} ⇄ ${b.name}`;
+      await bus.link(a.name, b.name, goal, 6, this.project?.id); return `${a.name} ⇄ ${b.name}`;
     }
     const [ag, other] = a.kind === 'agent' ? [a, b] : b.kind === 'agent' ? [b, a] : [null, null];
     if (ag && other?.kind === 'note') { await store.attach(other.doc.id, [ag.name]); return t('{0} reads {1}', ag.name, other.doc.title); }
@@ -693,7 +693,7 @@ export class App {
     const graph = this.project && a.item ? await P.loadGraph(this.project.id) : null;
     const allow = graph && a.item ? P.rulesFor(graph, a.item.name) : [];
     const trusted = !!(graph && a.item && A.isTrusted(graph, a.item.name));
-    this.chat = new ChatSession({ cwd: a.cwd, resume: a.session ? sid : undefined, sessionId: a.session ? undefined : sid, agent: a.item?.name, browser, deep: this.deep, allow,
+    this.chat = new ChatSession({ cwd: a.cwd, resume: a.session ? sid : undefined, sessionId: a.session ? undefined : sid, agent: a.item?.name, project: this.project?.id, browser, deep: this.deep, allow,
       model: this.prefs.model || undefined, effort: this.prefs.effort || (this.deep ? DEEP_EFFORT : undefined), permissionMode: this.prefs.permissionMode || (trusted ? 'bypassPermissions' : undefined) }, (e) => this.onChat(aid, e));
     this.chat.start();
     this.wokeFor.set(aid, Date.now());   // mensagens de antes não acordam: só o que chegar daqui em diante
@@ -706,7 +706,7 @@ export class App {
       if (c.busy || !c.proc) continue;
       const a = this.pv.nodes.find((n): n is P.AgentNode => n.kind === 'agent' && n.id === aid);
       if (!a?.item) continue;
-      const items = await bus.inbox(a.name).catch(() => []);
+      const items = await bus.inbox(a.name, this.project?.id).catch(() => []);
       const newest = items.reduce((m, i) => Math.max(m, i.ts), 0);
       if (!newest || newest <= (this.wokeFor.get(aid) ?? 0)) continue;
       this.wokeFor.set(aid, newest);
