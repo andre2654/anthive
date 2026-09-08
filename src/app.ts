@@ -60,6 +60,7 @@ export class App {
   get chat(): ChatSession | null { return this.agent ? this.chats.get(this.agent.id) ?? null : null; }
   set chat(v: ChatSession | null) { if (!this.agent) return; if (v) this.chats.set(this.agent.id, v); else this.chats.delete(this.agent.id); }
   private wokeFor = new Map<string, number>();
+  private stamped = false;
   composing = false; chatInput = new TextInput(); prefs = { model: '', effort: '', permissionMode: '' };
   showThinking = false; showPanel = true;
   snoozed = new Set<string>();   // permission requests the user postponed with esc
@@ -93,6 +94,7 @@ export class App {
       this.pv = await P.view(this.project);
       await this.pollApprovals();
       await this.wakeIdleChats();
+      if (!this.stamped) { this.stamped = true; void bus.stampThreads().catch(() => 0); }   // uma vez por sessão: conversas de antes do escopo ganham dono
       if (this.sel && !this.pv.nodes.some((n) => n.id === this.sel)) this.sel = this.pv.nodes[0]?.id ?? null;
       if (!this.sel) this.sel = this.pv.nodes[0]?.id ?? null;
       await this.applyBriefings();

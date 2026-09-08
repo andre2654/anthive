@@ -145,6 +145,13 @@ await new Promise((r) => setTimeout(r, 400));
 const wl2 = await Bun.file(fakeLog).text().catch(() => '');
 must('a second message inside the cooldown does not wake it twice', wl2.split(`--resume ${dbItem?.sessionId}`).length === 2);
 
+// --- conversations written before the scope get their owner ---
+const bus2 = await import('../src/core/bus.ts');
+const st2 = await import('../src/core/store.ts');
+const legacy = await st2.create({ kind: 'thread', id: 'dm-legacy-api-db', title: 'api ⇄ db', acl: ['api', 'db'], goal: 'antiga', budget: 6 });
+must('nasce sem projeto, como as de antes', !legacy.project);
+must('o carimbo acha o único projeto com os dois participantes', (await bus2.stampThreads()) >= 1 && (await st2.read('dm-legacy-api-db', 'thread'))?.project === project.id);
+
 // --- names are scoped to a project: four "maestro" cannot reach each other ---
 const other = await P.createProject('outra-obra', await mkdtemp(join(tmpdir(), 'anthive-other-')));
 await P.addAgent(other, 'api');   // mesmo nome, outro projeto

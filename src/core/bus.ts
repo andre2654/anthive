@@ -43,6 +43,30 @@ export function untrusted(author: string, text: string): string {
  */
 export const dmId = (a: string, b: string, project = '') => `dm-${project ? `${project}-` : ''}${[a, b].sort().join('-')}`;
 
+/**
+ * Carimba com o projeto as conversas escritas antes do escopo existir.
+ * Uma conversa pertence ao único projeto que tem todos os participantes; se
+ * mais de um tiver, ela fica sem carimbo, porque chutar é o bug de origem.
+ */
+export async function stampThreads(): Promise<number> {
+  const old = (await store.list('thread')).filter((d) => !d.project);
+  if (!old.length) return 0;
+  const projects = await listProjects();
+  const names = new Map<string, Set<string>>();
+  for (const p of projects) {
+    const g = await loadGraph(p.id);
+    names.set(p.id, new Set(g.items.filter((i) => i.kind === 'agent').map((i) => (i as { name: string }).name)));
+  }
+  let done = 0;
+  for (const d of old) {
+    const owners = projects.filter((p) => d.acl.every((n) => names.get(p.id)!.has(n)));
+    if (owners.length !== 1) continue;
+    await store.update(d, { project: owners[0]!.id });
+    done++;
+  }
+  return done;
+}
+
 /** Do meu projeto, ou de nenhum (as antigas, de antes do escopo). */
 const inScope = (d: store.Doc, project: string) => !project || !d.project || d.project === project;
 
