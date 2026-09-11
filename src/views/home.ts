@@ -1,71 +1,47 @@
-/**
- * Tela inicial: os projetos, um cartão cada, e o `+ Novo` no fim.
- * Setas escolhem, ↵ entra, n cria. Nada além disso aqui.
- */
 import { Grid, Rect } from '../tui/grid.ts';
-import { C, G, BG, ago, pad, padStart, fit, sparkline } from '../tui/theme.ts';
+import { C, G, BG, ago, fit, strong } from '../tui/theme.ts';
 import { ProjectCard } from '../core/project.ts';
-import { keybar, scrollHint } from './chrome.ts';
+import { keybar, scrollHint, surface } from './chrome.ts';
 import { t } from '../i18n.ts';
 
 export const CARD_H = 5;
-
 export interface HomeLayout { rects: { key: string; rect: Rect }[]; cols: number; cardW: number; height: number }
 
 export function layoutHome(n: number, W: number, scroll = 0): HomeLayout {
-  const avail = W - 4;
-  let cols = 3, cardW = 0;
-  for (cols = 3; cols >= 1; cols--) {
-    cardW = Math.min(36, Math.floor((avail - (cols - 1) * 3) / cols));
-    if (cardW >= 24) break;
-  }
-  if (cols < 1) { cols = 1; cardW = Math.max(20, avail); }
-  const rects: HomeLayout['rects'] = [];
-  const total = n + 1;   // + Novo
-  for (let i = 0; i < total; i++) {
-    const col = i % cols, row = Math.floor(i / cols);
-    rects.push({ key: i < n ? `proj:${i}` : 'new', rect: { x: 2 + col * (cardW + 3), y: 2 + row * (CARD_H + 1) - scroll, w: cardW, h: CARD_H } });
-  }
-  const rows = Math.ceil(total / cols);
-  return { rects, cols, cardW, height: 2 + rows * (CARD_H + 1) };
-}
-
-function card(g: Grid, c: ProjectCard, r: Rect, on: boolean) {
-  const inner = r.w - 4;
-  if (on) g.fill(r, BG.sel);
-  g.frame(r, c.project.name, on ? C.link : c.registered ? C.inkHi : C.ink, on ? C.link : C.frame);
-  const live = c.running > 0;
-  const l1 = live ? `${G.running} ${t('{0} running', c.running)}` : c.sessions.length ? `${G.idle} ${c.sessions.length === 1 ? t('1 session') : t('{0} sessions', c.sessions.length)}` : `${G.idle} ${t('no session')}`;
-  g.put(r.x + 2, r.y + 1, pad(l1, inner - 7), live ? C.run : C.dim);
-  g.put(r.x + 2 + inner - 7, r.y + 1, padStart(c.sessions.length ? ago(c.lastMs) : '', 7), C.frame);
-  const home = process.env.HOME ?? '';
-  g.put(r.x + 2, r.y + 2, pad(c.project.cwd.replace(home, '~'), inner), C.frame);
-  const spark = c.sessions.flatMap((s) => s.spark).slice(-inner);
-  g.put(r.x + 2, r.y + 3, spark.length ? sparkline(spark, inner) : pad(c.registered ? t('registered') : t('discovered from sessions'), inner), spark.length ? (live ? C.sparkR : C.sparkI) : C.frame);
-}
-
-function newCard(g: Grid, r: Rect, on: boolean) {
-  if (on) g.fill(r, BG.sel);
-  g.frame(r, '', C.frame, on ? C.link : C.frame);
-  const label = t('+ New');
-  g.put(r.x + Math.floor((r.w - label.length) / 2), r.y + 2, label, on ? C.link : C.dim);
+  const cols = W >= 120 ? 3 : W >= 76 ? 2 : 1;
+  const cardW = Math.floor((W - 4 - (cols - 1) * 2) / cols);
+  const rects = Array.from({ length: n + 1 }, (_, i) => ({
+    key: i < n ? `proj:${i}` : 'new',
+    rect: { x: 2 + i % cols * (cardW + 2), y: 5 + Math.floor(i / cols) * (CARD_H + 1) - scroll, w: cardW, h: CARD_H },
+  }));
+  return { rects, cols, cardW, height: 5 + Math.ceil((n + 1) / cols) * (CARD_H + 1) };
 }
 
 export function renderHome(g: Grid, cards: ProjectCard[], selected: string, scroll: number, status: string) {
   const { W, H } = g;
-  g.frame({ x: 0, y: 0, w: W, h: H }, 'anthive', C.inkHi);
-  const right = ` ${cards.length === 1 ? t('1 project') : t('{0} projects', cards.length)} `;
-  g.put(W - 2 - right.length, 0, right, C.dim);
-
+  surface(g, 'anthive', t('A workspace for your agents and their work.'));
+  g.put(2, 3, t('Your projects'), strong(C.inkHi));
+  const count = cards.length === 1 ? t('1 project') : t('{0} projects', cards.length);
+  g.put(W - 2 - count.length, 3, count, C.dim);
   const L = layoutHome(cards.length, W, scroll);
-  const top = 1, bottom = H - 4;
-  for (const { key, rect } of L.rects) {
-    if (rect.y < top || rect.y + rect.h - 1 > bottom) continue;
-    if (key === 'new') newCard(g, rect, selected === key);
-    else card(g, cards[Number(key.slice(5))]!, rect, selected === key);
-    g.hit(key, rect);
+  for (const { key, rect: r } of L.rects) {
+    if (r.y < 5 || r.y + r.h > H - 2) continue;
+    const on = key === selected;
+    g.panel(r, on ? BG.sel : BG.panel);
+    if (on) for (let y = r.y; y < r.y + r.h; y++) g.put(r.x, y, '▎', C.link);
+    if (key === 'new') {
+      g.put(r.x + 2, r.y + 1, t('+ New project'), strong(on ? C.link : C.ink));
+      g.put(r.x + 2, r.y + 2, fit(t('Choose a folder to get started'), r.w - 4), C.dim);
+    } else {
+      const c = cards[Number(key.slice(5))]!;
+      g.put(r.x + 2, r.y + 1, fit(c.project.name, r.w - 4), strong(C.inkHi));
+      g.put(r.x + 2, r.y + 2, fit(c.project.cwd.replace(process.env.HOME ?? '', '~'), r.w - 4), C.dim);
+      const label = c.running ? t('{0} running', c.running) : c.sessions.length ? t('{0} sessions', c.sessions.length) : t('Ready to start');
+      g.put(r.x + 2, r.y + 3, fit(`${c.running ? G.running : G.idle} ${label}`, r.w - 12), c.running ? C.run : C.dim);
+      if (c.sessions.length) g.put(r.x + r.w - 9, r.y + 3, fit(ago(c.lastMs), 7), C.dim);
+    }
+    g.hit(key, r);
   }
-  g.put(0, H - 3, G.teeL + G.h.repeat(W - 2) + G.teeR, C.frame);
-  scrollHint(g, H - 3, L.rects.filter((r) => r.rect.y < top).length, L.rects.filter((r) => r.rect.y + r.rect.h - 1 > bottom).length);
-  keybar(g, H - 2, [['↑↓←→', t('select')], ['↵', t('open')], ['n', t('new project')], ['q', t('quit')]], status);
+  scrollHint(g, H - 2, L.rects.filter(({ rect }) => rect.y < 5).length, L.rects.filter(({ rect }) => rect.y + rect.h > H - 2).length);
+  keybar(g, H - 1, [['↵', t('open')], ['n', t('new project')], ['↑↓←→', t('choose')], ['r', t('refresh')], ['q', t('quit')]], status);
 }

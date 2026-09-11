@@ -145,8 +145,8 @@ const grown = layoutProject(longView, 220, 0, false, 40).boxes.find((b) => b.nod
 must('com frase longa ela cresce, com teto de 60', grown.rect.w === 60);
 const tight = layoutProject(longView, 90, 0, false, 40).boxes.find((b) => b.node.kind === 'agent')!;
 must('mas nunca além da metade do espaço disponível', tight.rect.w < grown.rect.w && tight.rect.w <= Math.floor((90 - 4 - 3) / 2));
-must('com poucos agentes a caixa ganha duas linhas', agentH(app.pv!, 40) === 8 && wa.rect.h === 8);
-must('numa tela baixa ela volta ao tamanho de sempre', agentH(app.pv!, 14) === 6);
+must('com poucos agentes a caixa ganha duas linhas', agentH(app.pv!, 40) === 6 && wa.rect.h === 6);
+must('numa tela baixa ela volta ao tamanho de sempre', agentH(app.pv!, 14) === 4);
 
 await rm(claude, { recursive: true, force: true });
 console.log(fails ? `\n${fails} failure(s)` : '\nall green');

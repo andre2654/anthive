@@ -51,7 +51,7 @@ await settle();
 must('projeto criado e aberto', app.view === 'project' && app.project?.name === 'pedidos');
 must('cartão do projeto aparece no registro', (await P.listProjects()).some((p) => p.name === 'pedidos'));
 app.render();
-must('projeto vazio explica o que fazer', app.grid.toString().includes('empty project'));
+must('projeto vazio explica o que fazer', app.grid.toString().includes('Start with an agent'));
 
 // --- novo agente (sem instrução: não roda nada) ---
 type(app, 'n');
@@ -113,7 +113,7 @@ must('arquivo saiu do projeto', !app.pv?.nodes.some((n) => n.id === file!.id));
 app.sel = api.id; press(app, 'enter'); await settle();
 must('↵ no agent abre a tela dele', app.view === 'agent' && app.agent?.name === 'api');
 app.render();
-must('faixa de ligações lista a note e a conversa', app.grid.toString().includes('linked to') && app.grid.toString().includes('db 0/6'));
+must('faixa de ligações lista a note e a conversa', app.grid.toString().includes('Context') && app.grid.toString().includes('db 0/6'));
 type(app, 'e');
 must('e abre o seletor de esforço', app.modal?.kind === 'pick' && app.modal.title === 'effort');
 press(app, 'esc');

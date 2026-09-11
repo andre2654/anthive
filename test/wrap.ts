@@ -7,7 +7,7 @@ must('quebra por palavra dentro da largura', w.every((l) => [...l].length <= 40)
 must('nenhuma palavra cortada no meio', w.join(' ').replace(/\s+/g, ' ').includes('Wealth Studio, na branch'));
 must('parágrafo vira linha em branco', w.includes(''));
 must('palavra gigante é partida, não some', wrap('a'.repeat(95), 40).length === 3);
-must('largura de texto para 100 colunas é 62', detailWidth(100) === 62);
+must('largura de texto para 100 colunas é 71', detailWidth(100) === 71);
 // a prosa para de crescer: uma linha de 148 letras não se lê
 must('numa tela larga a prosa é limitada, a coluna de ferramenta não', proseWidth(240, true) === 92 && detailWidth(240, true) > 92);
 must('numa tela estreita a prosa usa o que tem', proseWidth(100) === detailWidth(100));

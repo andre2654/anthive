@@ -1,8 +1,8 @@
 import { Grid } from './tui/grid.ts';
 import { Screen, Key } from './tui/screen.ts';
-import { C, G, tok, BG, pad } from './tui/theme.ts';
+import { C, G, tok, BG, pad, plain } from './tui/theme.ts';
 import { TextInput, Form } from './tui/input.ts';
-import { renderForm, renderConfirm, renderPick, renderApproval, PickItem } from './views/prompt.ts';
+import { renderForm, renderConfirm, renderPick, renderApproval, approvalLayout, PickItem } from './views/prompt.ts';
 import { renderHome, layoutHome } from './views/home.ts';
 import { renderProject, layoutProject, KIND_GLYPH } from './views/project.ts';
 import { renderNote, renderFile, renderService, renderTask } from './views/item.ts';
@@ -12,7 +12,7 @@ import { supportsKittyGraphics, placeImage, clearImages } from './tui/image.ts';
 import { LiveView } from './core/live.ts';
 import { BrowserMode, fitImage, toPage, inBox } from './core/cdp.ts';
 import { modeLabel } from './views/item.ts';
-import { renderAgent, rows, Row, INPUT_H, LinkChip, detailWidth, tasksFrom, PanelData, panelFits, inputLayout, SubChip, renderPlain, TREE_TOP, proseWidth, PROSE_MAX, thumbBoxes } from './views/agent.ts';
+import { renderAgent, rows, Row, INPUT_H, LinkChip, detailWidth, tasksFrom, PanelData, panelFits, inputLayout, SubChip, renderPlain, TREE_TOP, proseWidth, PROSE_MAX, thumbBoxes, nameWidth } from './views/agent.ts';
 import * as P from './core/project.ts';
 import * as A from './core/approvals.ts';
 import { WAKE_PROMPT } from './core/wake.ts';
@@ -32,9 +32,9 @@ type Modal =
   | { kind: 'form'; form: Form; note?: string; submit: (v: string[]) => Promise<string> }
   | { kind: 'confirm'; title: string; lines: string[]; ok: () => Promise<string> }
   | { kind: 'pick'; title: string; items: PickItem[]; index: number; note?: string; submit: (v: string) => Promise<string> }
-  | { kind: 'approval'; req: A.Request; linkable: string | null };
+  | { kind: 'approval'; req: A.Request; linkable: string | null; scroll?: number };
 
-const nodeLabel = (n: P.Node) => n.kind === 'agent' ? n.name : n.kind === 'note' ? n.doc.title : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.kind === 'sub' ? n.sub.name : n.kind === 'wrote' ? n.label : n.kind === 'browser' ? 'browser' : n.item.name;
+const nodeLabel = (n: P.Node) => n.kind === 'agent' ? n.name : n.kind === 'note' ? plain(n.doc.title) : n.kind === 'file' ? n.item.label : n.kind === 'task' ? n.task.subject : n.kind === 'sub' ? n.sub.name : n.kind === 'wrote' ? n.label : n.kind === 'browser' ? 'browser' : n.item.name;
 
 /** O que a tela parada diz de si: vale para o mapa e para o chat. */
 const SELECT_BANNER = 'SELECTION MODE — screen frozen so you can select and copy — press any key to return';
@@ -63,7 +63,10 @@ export class App {
   private stamped = false;
   composing = false; chatInput = new TextInput(); prefs = { model: '', effort: '', permissionMode: '' };
   showThinking = false; showPanel = true;
+  unfolded = new Set<string>();   // agentes do mapa com os itens dobrados abertos: espaço alterna
   snoozed = new Set<string>();   // permission requests the user postponed with esc
+  pendingReqs: A.Request[] = [];   // every open permission request of the project: the map lists them under "needs you"
+  queued = new Map<string, { text: string; imgs: { media: string; data: string }[]; deep: boolean }>();   // a message typed mid-turn, sent when the answer lands
   deep = false;   // the [deep] chip of the input box: the next turn is a deep search
   // itens
   note: store.Doc | null = null; noteScroll = 0;
@@ -136,11 +139,11 @@ export class App {
   /** O quanto o mapa pode rolar: sem isso a roda leva a tela para o vazio. */
   private mapMax(): number {
     if (this.view !== 'project' || !this.pv) return 0;
-    return Math.max(0, layoutProject(this.pv, this.grid.W, 0, this.showPanel, this.grid.H).height - (this.grid.H - 5));
+    return Math.max(0, layoutProject(this.pv, this.grid.W, 0, this.showPanel, this.grid.H, { unfolded: this.unfolded, approvals: this.pendingReqs }).height - (this.grid.H - 4));
   }
   private rectsOnScreen(): { key: string; x: number; y: number }[] {
     if (this.view === 'home') return layoutHome(this.cards.length, this.grid.W, this.homeScroll).rects.map((r) => ({ key: r.key, x: r.rect.x + r.rect.w / 2, y: r.rect.y + r.rect.h / 2 }));
-    if (this.view === 'project' && this.pv) return layoutProject(this.pv, this.grid.W, this.pScroll, this.showPanel, this.grid.H).boxes.map((b) => ({ key: b.id, x: b.rect.x + b.rect.w / 2, y: b.rect.y + b.rect.h / 2 }));
+    if (this.view === 'project' && this.pv) return layoutProject(this.pv, this.grid.W, this.pScroll, this.showPanel, this.grid.H, { unfolded: this.unfolded, approvals: this.pendingReqs }).boxes.map((b) => ({ key: b.id, x: b.rect.x + b.rect.w / 2, y: b.rect.y + b.rect.h / 2 }));
     return [];
   }
   private get selKey() { return this.view === 'home' ? this.homeSel : this.sel; }
@@ -169,13 +172,13 @@ export class App {
     this.ensureVisible(); this.dirty = true;
   }
   ensureVisible() {
-    const top = 1, bottom = this.grid.H - 4;
+    const top = this.view === 'home' ? 5 : 3, bottom = this.grid.H - 3;
     if (this.view === 'home') {
       const r = layoutHome(this.cards.length, this.grid.W, this.homeScroll).rects.find((x) => x.key === this.homeSel)?.rect; if (!r) return;
       if (r.y < top) this.homeScroll -= top - r.y; else if (r.y + r.h - 1 > bottom) this.homeScroll += r.y + r.h - 1 - bottom;
       this.homeScroll = Math.max(0, this.homeScroll);
     } else if (this.view === 'project' && this.pv) {
-      const r = layoutProject(this.pv, this.grid.W, this.pScroll, this.showPanel, this.grid.H).boxes.find((b) => b.id === this.sel)?.rect; if (!r) return;
+      const r = layoutProject(this.pv, this.grid.W, this.pScroll, this.showPanel, this.grid.H, { unfolded: this.unfolded, approvals: this.pendingReqs }).boxes.find((b) => b.id === this.sel)?.rect; if (!r) return;
       if (r.y < top) this.pScroll -= top - r.y; else if (r.y + r.h - 1 > bottom) this.pScroll += r.y + r.h - 1 - bottom;
       this.pScroll = Math.max(0, this.pScroll);
     }
@@ -204,14 +207,29 @@ export class App {
     await this.openProject(c.registered ? c.project : await P.ensureProject(c.project.cwd));
   }
   async openProject(p: P.Project) {
-    this.project = p; this.view = 'project'; this.sel = null; this.pScroll = 0; this.linking = null;
+    this.project = p; this.view = 'project'; this.sel = null; this.pScroll = 0; this.linking = null; this.unfolded.clear();
     await this.load();
   }
 
   // ------------------------------------------------------------ projeto: abrir, criar, ligar, remover
   private node(id: string | null) { return id && this.pv ? this.pv.nodes.find((n) => n.id === id) ?? null : null; }
 
+  /** Espaço no mapa: dobra um agente concluído de volta a uma linha, ou mostra tudo o que um agente em atividade tem. */
+  toggleFold() {
+    const id = this.sel?.startsWith('more-') ? this.sel.slice(5) : this.sel;
+    const n = this.node(id);
+    if (!n || n.kind !== 'agent') { this.say(t('space folds and unfolds an agent'), 3000); return; }
+    if (this.unfolded.has(n.id)) this.unfolded.delete(n.id); else this.unfolded.add(n.id);
+    this.sel = n.id; this.ensureVisible(); this.dirty = true;
+  }
   async openSel() {
+    if (this.sel?.startsWith('more-')) return this.toggleFold();   // a linha `+N more`: ↵ mostra todos
+    if (this.sel?.startsWith('need-approval-')) { this.snoozed.delete(this.sel.slice('need-approval-'.length)); return this.pollApprovals(); }   // um pedido adiado volta
+    if (this.sel?.startsWith('need-') && this.pv) {   // agente travado ou conversa esgotada: a resposta está no chat dele
+      const box = layoutProject(this.pv, this.grid.W, this.pScroll, this.showPanel, this.grid.H, { unfolded: this.unfolded, approvals: this.pendingReqs }).boxes.find((b) => b.id === this.sel);
+      if (box && box.node.kind === 'agent') return this.openAgent(box.node);
+      return;
+    }
     const n = this.node(this.sel); if (!n) return;
     if (n.kind === 'agent') return this.openAgent(n);
     if (n.kind === 'note') { this.note = n.doc; this.noteScroll = 0; this.view = 'note'; }
@@ -240,8 +258,10 @@ export class App {
 
   /** A permission request from an agent of this project becomes a modal (bell included); esc postpones it. */
   async pollApprovals() {
-    if (!this.project || this.modal) return;
-    const next = (await A.pending(this.project.id)).find((r) => !this.snoozed.has(r.id));
+    if (!this.project) return;
+    this.pendingReqs = await A.pending(this.project.id);
+    if (this.modal) return;
+    const next = this.pendingReqs.find((r) => !this.snoozed.has(r.id));
     if (!next) return;
     const g = await P.loadGraph(this.project.id);
     const linkable = await A.fileIn(next, A.linkedFiles(g, next.agent));
@@ -479,9 +499,10 @@ export class App {
 
   // ------------------------------------------------------------ agente
   lastLoadedPath = '';
-  private memView() { return Math.max(1, this.grid.H - 8 - INPUT_H(this.composing, this.composing ? this.pastes.length : 0)); }
+  /** As linhas da árvore que cabem: a mesma conta do render (topo 3, caixa de escrita, status e teclas embaixo). */
+  private memView() { return Math.max(1, this.grid.H - 6 - INPUT_H(this.composing, this.composing ? this.pastes.length : 0)); }
   private rebuild(toBottom: boolean) {
-    this.rowsAll = rows(this.evs, this.agent?.cwd ?? '', this.expanded, proseWidth(this.grid.W, this.showPanel), this.showThinking, this.agent?.name ?? '');
+    this.rowsAll = rows(this.evs, this.agent?.cwd ?? '', this.expanded, proseWidth(this.grid.W, this.showPanel, nameWidth(this.agent?.name ?? '')), this.showThinking, this.agent?.name ?? '');
     const max = Math.max(0, this.rowsAll.length - this.memView());
     if (toBottom) { this.aScroll = max; this.aCursor = -1; } else this.aScroll = Math.min(this.aScroll, max);
     this.dirty = true;
@@ -495,7 +516,18 @@ export class App {
       .map((e) => (e.isDirectory() ? `${e.name}/` : e.name));
   }
   private async loadTranscript(s: Session) { this.evs = await parseSession(s.path); this.lastLoadedPath = s.path; this.expanded = new Set(); this.rebuild(true); }
+  private draftKey = '';
+  private drafts = new Map<string, { input: TextInput; pastes: (Pasted & { data: string })[]; deep: boolean }>();
   async openAgent(n: P.AgentNode) {
+    const key = `${this.project?.id ?? ''}/${n.id}`;
+    if (key !== this.draftKey) {
+      if (this.draftKey) this.drafts.set(this.draftKey, { input: this.chatInput, pastes: this.pastes, deep: this.deep });
+      const draft = this.drafts.get(key);
+      this.chatInput = draft?.input ?? new TextInput();
+      this.pastes = draft?.pastes ?? [];
+      this.deep = draft?.deep ?? false;
+      this.draftKey = key;
+    }
     this.agent = n; this.view = 'agent'; this.composing = false;
     if (n.session) await this.loadTranscript(n.session); else { this.evs = []; this.lastLoadedPath = ''; this.rebuild(true); }
     // trocar de agente não mata chat nenhum: cada agente tem o seu no mapa de chats, e segue rodando fora da tela
@@ -700,7 +732,7 @@ export class App {
     this.chat.start();
     this.wokeFor.set(aid, Date.now());   // mensagens de antes não acordam: só o que chegar daqui em diante
   }
-  stopChat() { this.chat?.stop(); this.chat = null; if (this.agent) this.pendingPatches.delete(this.agent.id); this.composing = false; this.dirty = true; }
+  stopChat() { this.chat?.stop(); this.chat = null; if (this.agent) { this.pendingPatches.delete(this.agent.id); this.queued.delete(this.agent.id); } this.composing = false; this.dirty = true; }
   /** Um chat aberto e parado com mensagem nova na caixa recebe um turno para ler: sem isso a conversa morre com o worker calado. */
   private async wakeIdleChats() {
     if (!this.pv) return;
@@ -730,7 +762,7 @@ export class App {
   }
   private onChat(aid: string, e: ChatEvent) {
     const c = this.chats.get(aid);
-    if (e.kind === 'ev') { if (this.agent?.id !== aid || this.watchOnly) { this.dirty = true; return; } this.evs.push(e.ev); this.rebuild(true); }   // só a árvore do agente visível recebe; o transcript em disco guarda o resto
+    if (e.kind === 'ev') { if (this.agent?.id !== aid || this.watchOnly) { this.dirty = true; return; } const following = this.aScroll >= Math.max(0, this.rowsAll.length - this.memView()); this.evs.push(e.ev); this.rebuild(following); }   // só a árvore do agente visível recebe; o transcript em disco guarda o resto
     else if (e.kind === 'result') {
       this.screen.write('\x07');
       const pending = this.pendingPatches.get(aid);
@@ -739,16 +771,33 @@ export class App {
       const den = e.denials.length ? ` · ${web ? t('denied {0} — D or tab (deep search) allows the web', e.denials.join(', ')) : t('denied {0} — p changes permissions', e.denials.join(', '))}` : '';
       const note = c?.deep ? /note:\/\/([\w-]+)/.exec(e.text)?.[1] : null;
       this.say(`${e.stop || 'ok'}${e.cost ? ` · $${e.cost.toFixed(3)}` : ''}${note ? ` · ${t('report in note://{0}', note)}` : ''}${den}`, den || note ? 8000 : 3000);
+      const q = this.queued.get(aid);
+      if (q && c && !c.busy && c.proc) {
+        this.queued.delete(aid);
+        if (q.deep && !c.deep) c.restart({ deep: true, effort: this.prefs.effort || DEEP_EFFORT });
+        if (c.send(q.text, q.imgs)) {
+          const mark = q.imgs.length ? `${q.imgs.map(() => `[${t('image')}]`).join(' ')}${q.text ? ' ' : ''}` : '';
+          if (this.agent?.id === aid && !this.watchOnly) { this.evs.push({ uuid: crypto.randomUUID(), parent: null, sidechain: false, type: 'user', ts: Date.now(), role: 'user', text: mark + q.text, full: mark + q.text, image: q.imgs[0] }); this.rebuild(true); }
+          this.say(t('queued message sent'), 3000);
+        }
+      }
     }
     else if (e.kind === 'stderr') this.say(e.text.split('\n')[0] ?? 'erro', 6000);
-    else if (e.kind === 'exit') { if (c && !c.proc) return; this.say(t('chat exited ({0})', e.code), 5000); this.chats.delete(aid); if (this.agent?.id === aid) this.composing = false; }
+    else if (e.kind === 'exit') { if (c && !c.proc) return; this.say(t('chat exited ({0})', e.code), 5000); this.chats.delete(aid); this.queued.delete(aid); if (this.agent?.id === aid) this.composing = false; }
     this.dirty = true;
   }
   sendChat() {
     const text = this.chatInput.value.trim();
     if (!text && !this.pastes.length) return;
     if (!this.chat) { this.say(t('opening the chat… send again in a moment')); void this.op(this.startChat()); return; }
-    if (this.chat.busy) { this.say(t('wait for the answer to finish')); return; }
+    if (this.chat.busy) {
+      // mid-turn: the message waits its turn and goes out by itself when this answer lands
+      const aid = this.agent!.id, had = this.queued.has(aid);
+      this.queued.set(aid, { text: this.deep ? deepPrompt(text) : text, imgs: this.pastes.map((p) => ({ media: p.media, data: p.data })), deep: this.deep });
+      this.pastes = []; this.chatInput.set(''); this.dirty = true;
+      this.say(had ? t('replaced the queued message — it goes out when this answer finishes') : t('queued — it goes out when this answer finishes'), 4000);
+      return;
+    }
     // the chip was turned on while the answer was running: the process gets the web tools now, before this turn
     if (this.deep && !this.chat.deep) this.chat.restart({ deep: true, effort: this.prefs.effort || DEEP_EFFORT });
     const sent = this.deep ? deepPrompt(text) : text;
@@ -838,6 +887,25 @@ export class App {
     })());
   }
 
+  private commandKey(command: string): Key | null {
+    if (command === '↵') return { k: 'enter' };
+    if (command === 'esc') return { k: 'esc' };
+    if (command === 'tab') return { k: 'tab' };
+    if (command === '^v') return { k: 'char', c: '\x16' };
+    if (command === '⌫') return { k: 'backspace' };
+    return [...command].length === 1 ? { k: 'char', c: command } : null;
+  }
+  private openActions() {
+    const actions = this.grid.actions.filter(([key]) => this.commandKey(key));
+    if (!this.composing && !this.typing && !actions.some(([key]) => key === 'q')) actions.push(['q', t('quit')]);
+    this.modal = { kind: 'pick', title: t('Actions'), index: 0,
+      note: t('Arrow keys navigate · shortcuts work outside text fields'),
+      items: actions.map(([key, label]) => ({ value: key, label: `${key.padEnd(4)} ${label}` })),
+      submit: async (value) => { const key = this.commandKey(value); if (key) this.key(key); return ''; },
+    };
+    this.dirty = true;
+  }
+
   // ------------------------------------------------------------ teclas
   key(k: Key): void {
     if (k.k === 'cellpx') { this.cellW = k.w; this.cellH = k.h; this.dirty = true; return; }
@@ -845,6 +913,9 @@ export class App {
     if (this.modal) {
       const m = this.modal;
       if (m.kind === 'approval') {
+        const layout = approvalLayout(this.grid.W, this.grid.H, A.summary(m.req.tool, m.req.input));
+        const delta = k.k === 'up' ? -1 : k.k === 'down' ? 1 : k.k === 'wheel' ? k.dir * 3 : 0;
+        if (delta) { m.scroll = Math.max(0, Math.min(layout.body.length - layout.count, (m.scroll ?? 0) + delta)); this.dirty = true; return; }
         const go = (how: 'allow' | 'always' | 'link' | 'trust' | 'deny') => { const { req, linkable } = m; void this.runModal(() => this.answer(req, how, linkable)); };
         if (k.k === 'char' && 'yY'.includes(k.c)) go('allow');
         else if (k.k === 'char' && 'aA'.includes(k.c)) go('always');
@@ -854,14 +925,24 @@ export class App {
         else if (k.k === 'esc') { this.snoozed.add(m.req.id); this.modal = null; this.say(t('later — the agent keeps waiting; the request comes back on the next open'), 5000); }
         this.dirty = true; return;
       }
-      if (m.kind === 'confirm') { if (k.k === 'char' && 'sSy'.includes(k.c)) void this.runModal(m.ok); else if (k.k === 'esc' || (k.k === 'char' && 'nN'.includes(k.c))) { this.modal = null; this.dirty = true; } return; }
+      if (m.kind === 'confirm') { if (k.k === 'char' && 'sSyY'.includes(k.c)) void this.runModal(m.ok); else if (k.k === 'esc' || (k.k === 'char' && 'nN'.includes(k.c))) { this.modal = null; this.dirty = true; } return; }
       if (m.kind === 'pick') {
         const n = m.items.length;
-        if (k.k === 'up' || (k.k === 'char' && k.c === 'k')) m.index = (m.index - 1 + n) % n;
+        if (!n) { if (k.k === 'esc') this.modal = null; this.dirty = true; return; }
+        if (k.k === 'mouse' && k.press && k.button === 0) {
+          const hit = this.grid.hitTest(k.x, k.y);
+          if (hit?.startsWith('pick:')) { const i = Number(hit.slice(5)); if (i === m.index) void this.runModal(() => m.submit(m.items[i]!.value)); else m.index = i; }
+        }
+        else if (k.k === 'wheel') m.index = Math.max(0, Math.min(n - 1, m.index + k.dir));
+        else if (k.k === 'up' || (k.k === 'char' && k.c === 'k')) m.index = (m.index - 1 + n) % n;
         else if (k.k === 'down' || (k.k === 'char' && k.c === 'j') || k.k === 'tab') m.index = (m.index + 1) % n;
         else if (k.k === 'enter') { const v = m.items[m.index]!.value; void this.runModal(() => m.submit(v)); return; }
         else if (k.k === 'esc') this.modal = null;
         else if (k.k === 'char' && k.c >= ' ') { const c = k.c.toLowerCase(); for (let i = 1; i <= n; i++) { const j = (m.index + i) % n; if (m.items[j]!.label.toLowerCase().split(/[-_\s]+/).some((w) => w.startsWith(c))) { m.index = j; break; } } }
+        this.dirty = true; return;
+      }
+      if (k.k === 'mouse' && k.press && k.button === 0) {
+        const hit = this.grid.hitTest(k.x, k.y); if (hit?.startsWith('field:')) m.form.active = Number(hit.slice(6));
         this.dirty = true; return;
       }
       const r = m.form.handle(k);
@@ -870,8 +951,17 @@ export class App {
     }
     if (this.inline) {
       const f = this.inline;
-      if (k.k === 'esc') this.inline = null; else if (k.k === 'enter') void this.runInline(() => f.submit(f.input.value)); else f.input.handle(k);
+      if (k.k === 'esc') this.inline = null; else if (k.k === 'enter') void this.runInline(() => f.submit(f.input.value)); else if (k.k === 'paste') f.input.insert(k.text.replace(/[\r\n]+/g, ' ')); else f.input.handle(k);
       this.dirty = true; return;
+    }
+    if (k.k === 'mouse' && k.press && k.button === 0 && !this.selecting) {
+      const hit = this.grid.hitTest(k.x, k.y);
+      if (hit?.startsWith('action:')) {
+        const action = hit.slice(7);
+        if (action === '?') this.openActions();
+        else { const key = this.commandKey(action); if (key) this.key(key); }
+        return;
+      }
     }
     if (this.linking && this.view === 'project') {
       if (k.k === 'esc') { this.linking = null; this.dirty = true; return; }
@@ -892,8 +982,9 @@ export class App {
       else if (k.k !== 'mouse' && k.k !== 'motion') this.toggleSelect();   // qualquer outra tecla volta: uma tela parada nunca pode parecer travamento
       return;
     }
+    if (k.k === 'char' && k.c === '?' && !(this.view === 'agent' && this.composing) && !(this.view === 'browser' && this.typing)) return this.openActions();
     if (k.k === 'char' && k.c === 's' && !(this.view === 'agent' && this.composing) && !(this.view === 'browser' && this.typing)) return this.toggleSelect();
-    if (k.k === 'char' && (k.c === 'q' || k.c === 'Q') && !(this.view === 'agent' && this.composing)) return this.askQuit();
+    if (k.k === 'char' && (k.c === 'q' || k.c === 'Q') && !(this.view === 'agent' && this.composing) && !(this.view === 'browser' && this.typing)) return this.askQuit();
 
     switch (this.view) {
       case 'home':
@@ -903,6 +994,7 @@ export class App {
         else if (k.k === 'mouse' && k.press && k.button === 0) { const h = this.grid.hitTest(k.x, k.y); if (h) { if (h === this.homeSel) void this.op(this.openHomeSel()); else this.homeSel = h; this.dirty = true; } }
         else if (k.k === 'char' && k.c === 'n') this.newProject();
         else if (k.k === 'char' && k.c === 'r') void this.load();
+        else if (k.k === 'wheel') { this.cycle(k.dir * layoutHome(this.cards.length, this.grid.W).cols); }
         return;
       case 'project':
         if (k.k === 'up' || k.k === 'down' || k.k === 'left' || k.k === 'right') this.navigate(k.k);
@@ -912,7 +1004,8 @@ export class App {
         else if (k.k === 'mouse' && k.press && k.button === 0) { const h = this.grid.hitTest(k.x, k.y); if (h) { if (h === this.sel) void this.op(this.openSel()); else this.sel = h; this.dirty = true; } }
         else if (k.k === 'esc') { this.project = null; this.pv = null; this.view = 'home'; void this.op(this.load()); }
         else if (k.k === 'char') {
-          if (k.c === 'n') this.pickKind();
+          if (k.c === ' ') this.toggleFold();
+          else if (k.c === 'n') this.pickKind();
           else if (k.c === 'l') { if (!this.sel) this.say(t('select something first')); else if (this.node(this.sel)?.kind === 'sub') this.say(t('a subagent cannot be linked — link its parent'), 4000); else if ((this.rectsOnScreen().length) < 2) this.say(t('no other node to link')); else { this.linking = { source: this.sel }; this.dirty = true; } }
           else if (k.c === 'd') this.removeSel();
           else if (k.c === 'r') void this.load();
@@ -920,7 +1013,7 @@ export class App {
         }
         return;
       case 'diff': {
-        const max = Math.max(0, this.diffTotal - (this.grid.H - 7));
+        const max = Math.max(0, this.diffTotal - (this.grid.H - 6));
         if (k.k === 'up') this.diffScroll = Math.max(0, this.diffScroll - 1);
         else if (k.k === 'down') this.diffScroll = Math.min(max, this.diffScroll + 1);
         else if (k.k === 'wheel') this.diffScroll = Math.max(0, Math.min(max, this.diffScroll + k.dir * 3));
@@ -963,6 +1056,7 @@ export class App {
       if (k.k === 'tab') { this.setDeep(!this.deep); return; }
           if (k.k === 'char' && k.c === '\x16') { void this.op(this.pasteFromClipboard()); return; }   // ctrl-v
           if (k.k === 'backspace' && !this.chatInput.value && this.pastes.length) { this.dropPaste(); return; }
+          if (k.k === 'backspace' && !this.chatInput.value && this.agent && this.queued.has(this.agent.id)) { this.queued.delete(this.agent.id); this.say(t('queued message dropped')); this.dirty = true; return; }
           if (k.k !== 'up' && k.k !== 'down' && k.k !== 'wheel') { this.chatInput.handle(k); this.dirty = true; return; }
         }
         const view = this.memView(), max = Math.max(0, this.rowsAll.length - view);
@@ -1017,12 +1111,12 @@ export class App {
 
     if (this.statusUntil && Date.now() > this.statusUntil) { this.status = ''; this.statusUntil = 0; }
     if (this.flashUntil && Date.now() > this.flashUntil) { this.flashEv = null; this.flashUntil = 0; }
-    if (this.grid.W !== this.screen.W || this.grid.H !== this.screen.H) { this.grid = new Grid(this.screen.W, this.screen.H); this.prev = null; this.screen.write('\x1b[2J'); if (this.view === 'agent') this.rebuild(false); }
+    if (this.grid.W !== this.screen.W || this.grid.H !== this.screen.H) { this.grid = new Grid(this.screen.W, this.screen.H); this.prev = null; this.screen.write('\x1b[2J'); if (this.view === 'agent') this.rebuild(false); else this.ensureVisible(); }
     this.grid.clear();
     const g = this.grid;
     if (this.screen.W < 60 || this.screen.H < 16) { g.put(1, 1, t('terminal too small'), C.dead); g.put(1, 2, `${this.screen.W}x${this.screen.H} — ${t('minimum 60x16')}`, C.dim); }
     else if (this.view === 'home') renderHome(g, this.cards, this.homeSel, this.homeScroll, this.status);
-    else if (this.view === 'project' && this.pv) renderProject(g, this.pv, this.sel, this.pScroll, this.status, { linkSource: this.linking?.source ?? null, tick: this.pulsing() ? this.tick : -1, panel: this.showPanel });
+    else if (this.view === 'project' && this.pv) renderProject(g, this.pv, this.sel, this.pScroll, this.status, { linkSource: this.linking?.source ?? null, tick: this.pulsing() ? this.tick : -1, panel: this.showPanel, unfolded: this.unfolded, approvals: this.pendingReqs });
     else if (this.view === 'diff' && this.diffEv) this.diffTotal = renderDiff(g, this.diffEv, hunksOf(this.diffEv), this.diffScroll, this.status);
     else if (this.view === 'task' && this.task) { const ag = this.node(this.task.agent); renderTask(g, this.task, ag && ag.kind === 'agent' ? ag.name : '?', this.status, this.linksOf(this.task.id)); }
     else if (this.view === 'browser' && this.browser) {
@@ -1037,7 +1131,7 @@ export class App {
       const lay = inputLayout(this.grid.W, this.deep);
     const win = this.composing ? this.chatInput.window(lay.w) : null;
     const w = win ? { ...win, text: win.text.replace(/\n/g, '↵') } : null;   // a quebra vira glifo: a grade não desenha \n
-      renderAgent(g, this.agent, this.agent.session, this.evs, this.rowsAll, this.aScroll, this.aCursor, this.status, this.watchOnly ? null : (w ? { text: w.text, cursor: w.cursorAt, deep: this.deep } : null), this.watchOnly ? null : this.live, this.chips(), this.panelData(), this.watchOnly, { hover: this.hoverEv, flash: this.flashEv }, this.composing ? this.pastes.map((p) => ({ name: `${Math.round(p.bytes / 1024)} KB`, bytes: p.bytes })) : []);
+      renderAgent(g, this.agent, this.agent.session, this.evs, this.rowsAll, this.aScroll, this.aCursor, this.status, this.watchOnly ? null : (w ? { text: w.text, cursor: w.cursorAt, deep: this.deep } : null), this.watchOnly ? null : this.live, this.chips(), this.panelData(), this.watchOnly, { hover: this.hoverEv, flash: this.flashEv, queued: this.agent ? this.queued.get(this.agent.id)?.text : undefined }, this.composing ? this.pastes.map((p) => ({ name: `${Math.round(p.bytes / 1024)} KB`, bytes: p.bytes })) : []);
     }
     else if (this.view === 'note' && this.note) renderNote(g, this.note, this.noteScroll, this.status, this.linksOf(`note-${this.note.id}`));
     else if (this.view === 'file' && this.file) renderFile(g, this.file, this.fileLines, this.fileScroll, this.status, this.linksOf(this.file.id));
@@ -1045,21 +1139,21 @@ export class App {
 
     if (this.modal?.kind === 'form') renderForm(g, this.modal.form, this.modal.note);
     else if (this.modal?.kind === 'confirm') renderConfirm(g, this.modal.title, this.modal.lines);
-    else if (this.modal?.kind === 'approval') renderApproval(g, this.modal.req.agent, this.modal.req.tool, A.summary(this.modal.req.tool, this.modal.req.input), { linkable: this.modal.linkable ? basename(this.modal.linkable) : null, rule: A.ruleLabel(this.modal.req.tool, A.prefixOf(this.modal.req.tool, this.modal.req.input)) });
+    else if (this.modal?.kind === 'approval') renderApproval(g, this.modal.req.agent, this.modal.req.tool, A.summary(this.modal.req.tool, this.modal.req.input), { linkable: this.modal.linkable ? basename(this.modal.linkable) : null, scroll: this.modal.scroll, rule: A.ruleLabel(this.modal.req.tool, A.prefixOf(this.modal.req.tool, this.modal.req.input)) });
     else if (this.modal?.kind === 'pick') renderPick(g, this.modal.title, this.modal.items, this.modal.index, this.modal.note);
     else if (this.inline) {
       const lab = `${this.inline.label} › `; const w = this.inline.input.window(Math.max(8, g.W - lab.length - 26));
       // superfície opaca: apaga o rodapé que estava nessa linha, não só pinta o fundo
-      g.panel({ x: 1, y: g.H - 2, w: g.W - 2, h: 1 }, [0x1c, 0x22, 0x2e]);
-      g.put(2, g.H - 2, lab, C.link, [0x1c, 0x22, 0x2e]); g.put(2 + lab.length, g.H - 2, w.text, C.inkHi, [0x1c, 0x22, 0x2e]);
+      g.panel({ x: 1, y: g.H - 1, w: g.W - 2, h: 1 }, BG.input);
+      g.put(2, g.H - 1, lab, C.link, BG.input); g.put(2 + lab.length, g.H - 1, w.text, C.inkHi, BG.input);
       const hint = '↵ confirm   esc cancel';
-      g.put(g.W - 2 - hint.length, g.H - 2, hint, C.frame, [0x1c, 0x22, 0x2e]);
-      g.cursor = { x: 2 + lab.length + w.cursorAt, y: g.H - 2 };
+      g.put(g.W - 2 - hint.length, g.H - 1, hint, C.dim, BG.input);
+      g.cursor = { x: 2 + lab.length + w.cursorAt, y: g.H - 1 };
     }
     const wasFull = this.prev === null;
     this.screen.write(g.diff(this.prev)); this.prev = g.snapshot(); this.dirty = false;
     // as imagens coladas: mesma mecânica da página ao vivo, ids próprios
-    if (this.view === 'agent' && this.composing && this.pastes.length && supportsKittyGraphics()) {
+    if (!this.modal && this.view === 'agent' && this.composing && this.pastes.length && supportsKittyGraphics()) {
       const boxes = thumbBoxes(this.grid.W, this.grid.H, this.pastes.length);
       const key = this.pastes.map((p) => p.path).join('|') + `:${this.grid.W}x${this.grid.H}`;
       if (key !== this.thumbKey || wasFull) {
@@ -1069,7 +1163,8 @@ export class App {
     } else if (this.thumbKey) { this.screen.write([20, 21, 22, 23].map((i) => `\x1b_Ga=d,d=i,i=${i},q=2\x1b\\`).join('')); this.thumbKey = ''; }
 
     // a página ao vivo vai como imagem de verdade, depois do diff, só quando há frame novo (ou num redesenho completo)
-    if (this.view === 'browser' && this.imgBox && this.page?.frame) {
+    if (this.modal && this.imgKey) { this.screen.write(clearImages()); this.imgKey = ''; }
+    if (!this.modal && this.view === 'browser' && this.imgBox && this.page?.frame) {
       const fr = this.page.frame, b = this.imgBox, key = `${fr.at}:${b.x}:${b.y}:${b.cols}:${b.rows}`;
       if (key !== this.imgKey || wasFull) {
         const next = this.imgId === 1 ? 2 : 1;

@@ -6,7 +6,7 @@
 import { Grid } from './grid.ts';
 import { C, G, fit } from './theme.ts';
 import { Ev } from '../core/sessions.ts';
-import { keybar, scrollHint } from '../views/chrome.ts';
+import { keybar, scrollHint, surface } from '../views/chrome.ts';
 import { t } from '../i18n.ts';
 
 export interface DiffLine { kind: 'same' | 'add' | 'del'; text: string }
@@ -47,7 +47,7 @@ export function renderDiff(g: Grid, ev: Ev, hunks: Hunk[], scroll: number, statu
   const { W, H } = g;
   const home = process.env.HOME ?? '';
   const path = hunks[0]?.path ?? '';
-  g.frame({ x: 0, y: 0, w: W, h: H }, `${G.tool} ${ev.tool} ${fit(path.split('/').pop() ?? '', W - 30)}`, C.inkHi);
+  surface(g, `anthive / ${t('Changes')} / ${fit(path.split('/').pop() ?? '', W - 30)}`);
   const adds = hunks.reduce((n, h) => n + h.lines.filter((l) => l.kind === 'add').length, 0);
   const dels = hunks.reduce((n, h) => n + h.lines.filter((l) => l.kind === 'del').length, 0);
   g.put(2, 1, fit(`${path.replace(home, '~')}  ${G.h}  `, W - 24), C.dim);
@@ -61,7 +61,7 @@ export function renderDiff(g: Grid, ev: Ev, hunks: Hunk[], scroll: number, statu
     for (const l of h.lines) rows.push(l);
     if (i < hunks.length - 1) rows.push({ kind: 'note', text: '' });
   });
-  const top = 3, bottom = H - 4, view = Math.max(1, bottom - top + 1);
+  const top = 3, bottom = H - 3, view = Math.max(1, bottom - top + 1);
   const slice = rows.slice(scroll, scroll + view);
   for (let i = 0; i < slice.length; i++) {
     const r = slice[i]!, y = top + i;
@@ -72,8 +72,7 @@ export function renderDiff(g: Grid, ev: Ev, hunks: Hunk[], scroll: number, statu
     g.put(2, y, mark, col);
     g.put(4, y, fit(r.text.replace(/\t/g, '  '), W - 6), col);
   }
-  scrollHint(g, H - 3, scroll, Math.max(0, rows.length - scroll - view));
-  g.put(0, H - 3, G.teeL + G.h.repeat(W - 2) + G.teeR, C.frame);
-  keybar(g, H - 2, [['↑↓', t('scroll')], ['esc', t('back to the chat')]], status);
+  scrollHint(g, H - 2, scroll, Math.max(0, rows.length - scroll - view));
+  keybar(g, H - 1, [['↑↓', t('scroll')], ['esc', t('chat')]], status);
   return rows.length;
 }

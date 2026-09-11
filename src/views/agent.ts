@@ -8,13 +8,13 @@ import { browserTool, AgentNode } from '../core/project.ts';
 import { browserShort } from './item.ts';
 import { C, G, RGB, BG, gauge, sparkline, ago, tok, fit, pad, padStart, strong } from '../tui/theme.ts';
 import { Ev, Session, windowOf } from '../core/sessions.ts';
-import { keybar, scrollHint } from './chrome.ts';
+import { keybar, scrollHint, surface } from './chrome.ts';
 import { renderMd, Span } from '../tui/markdown.ts';
 import { t } from '../i18n.ts';
 
 export type RowKind = 'turn' | 'child' | 'cont' | 'summary' | 'compact' | 'now' | 'blank';
 export type Voice = 'you' | 'agent' | 'thought';
-export interface Row { kind: RowKind; turn: string | null; connector: string; glyph: string; gc: RGB; name: string; nc: RGB; detail: string; dc: RGB; right: string; ts: number; showTime: boolean; voice?: Voice; spans?: Span[]; ev?: string }
+export interface Row { kind: RowKind; turn: string | null; connector: string; glyph: string; gc: RGB; name: string; nc: RGB; detail: string; dc: RGB; right: string; ts: number; showTime: boolean; voice?: Voice; spans?: Span[]; ev?: string; indent?: number }
 const BLANK: Row = { kind: 'blank', turn: null, connector: '', glyph: '', gc: C.frame, name: '', nc: C.frame, detail: '', dc: C.frame, right: '', ts: 0, showTime: false };
 const COLLAPSE_OVER = 6;
 
@@ -23,7 +23,7 @@ function splitTool(text: string, tool: string, cwd: string): { name: string; det
   if (cwd) detail = detail.replace(new RegExp(`^cd ${cwd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+(&&\\s*)?`), '');
   return { name: tool.startsWith('mcp__') ? (tool.split('__').pop() ?? tool) : tool, detail };
 }
-interface Child { glyph: string; gc: RGB; name: string; nc: RGB; detail: string; dc: RGB; right: string; indent: number; tool?: string; out: number; thinking?: boolean; full?: string; thought?: string; ev?: string }
+interface Child { glyph: string; gc: RGB; name: string; nc: RGB; detail: string; dc: RGB; right: string; indent: number; tool?: string; out: number; thinking?: boolean; full?: string; thought?: string; ev?: string; ts?: number }
 
 /** Largura da coluna de texto para uma tela de W colunas — a mesma conta do render. */
 export const TREE_TOP = 3;   // the first row of the tree: hover and clicks map back through it
@@ -31,14 +31,18 @@ export const PANEL_W = 34;
 /** O painel cresce com a tela: em 34 colunas ele corta os próprios valores. */
 export const panelW = (W: number) => Math.min(46, Math.max(PANEL_W, Math.floor(W * 0.22)));
 export const panelFits = (W: number) => W >= 110;
-export const detailWidth = (W: number, panel = false) => Math.max(8, W - 38 - (panel && panelFits(W) ? panelW(W) : 0));
+/** As colunas da conversa: glifo e nome à esquerda, hora e tokens à direita. Não há mais coluna de conector: a estrutura é indentação e linha em branco. */
+export const CONN_W = 0, TIME_W = 5, TOK_W = 6, NAME_W = 11;
+/** A coluna do nome cresce com o nome do agente para nunca encostar na barra; ferramenta mais longa é cortada. */
+export const nameWidth = (name: string) => Math.max(NAME_W, Math.min(18, [...name].length + 2));
+export const detailWidth = (W: number, panel = false, nameW = NAME_W) => Math.max(8, W - (18 + nameW) - (panel && panelFits(W) ? panelW(W) : 0));
 /**
  * A largura em que a prosa é quebrada. Uma linha de 148 letras, que é o que
  * uma tela larga dava, não se lê: o olho perde a linha na volta. O texto para
  * de crescer aqui e o resto da tela vira margem.
  */
 export const PROSE_MAX = 92;
-export const proseWidth = (W: number, panel = false) => Math.min(detailWidth(W, panel), PROSE_MAX);
+export const proseWidth = (W: number, panel = false, nameW = NAME_W) => Math.min(detailWidth(W, panel, nameW), PROSE_MAX);
 
 export { tasksFrom } from '../core/tasks.ts';
 export type { Task } from '../core/tasks.ts';
@@ -76,6 +80,7 @@ export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), wid
     if (!pending.length) return;
     for (let i = 0; i < pending.length; i++) { const c = pending[i]!, nx = pending[i + 1]; if (nx && nx.right === c.right && nx.out === c.out) { c.right = ''; c.out = 0; } }
     const open = turnId === null || live || expanded.has(turnId) || pending.length <= COLLAPSE_OVER;
+    if (out.length && out[out.length - 1]!.kind !== 'blank') out.push(BLANK);   // a resposta é um bloco próprio, separado do seu turno
     if (!open) {
       const by = new Map<string, number>();
       for (const c of pending) if (c.tool) by.set(c.tool, (by.get(c.tool) ?? 0) + 1);
@@ -83,27 +88,40 @@ export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), wid
       const spent = pending.reduce((n, c) => n + c.out, 0);
       out.push({ kind: 'summary', turn: turnId, connector: G.branchEnd, glyph: G.tool, gc: C.frame, name: t('{0} actions', pending.length), nc: C.dim, detail: tools ? `${tools}  ${G.h}  ${t('↵ opens')}` : t('↵ opens'), dc: C.frame, right: spent ? tok(spent) : '', ts: 0, showTime: false });
     } else {
+      const foldRuns = !live && turnId !== null && !expanded.has(turnId);   // num turno passado, três ou mais ferramentas seguidas viram uma linha
       for (let i = 0; i < pending.length; i++) {
         const c = pending[i]!, last = i === pending.length - 1 || pending[i + 1]!.indent < c.indent;
-        const conn = (c.indent ? '│  ' : '') + (last ? G.branchEnd : G.branchMid);
+        if (foldRuns && c.tool && !c.thinking && !c.thought) {
+          let j = i; while (j < pending.length && pending[j]!.tool && !pending[j]!.thinking && !pending[j]!.thought && pending[j]!.indent === c.indent) j++;
+          if (j - i >= 3) {
+            const run = pending.slice(i, j), by = new Map<string, number>();
+            for (const x of run) by.set(x.tool!, (by.get(x.tool!) ?? 0) + 1);
+            const tools = [...by.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, n]) => `${k}×${n}`).join(' ');
+            const spent = run.reduce((n, x) => n + x.out, 0);
+            out.push({ kind: 'summary', turn: turnId, connector: '', glyph: G.tool, gc: C.frame, name: t('{0} tools', run.length), nc: C.dim, detail: `${tools}  ${G.h}  ${t('↵ opens')}`, dc: C.frame, right: spent ? tok(spent) : '', ts: 0, showTime: false, indent: c.indent });
+            i = j - 1; continue;
+          }
+        }
+        const conn = (c.indent ? '│ ' : '') + (last ? G.branchEnd : G.branchMid);
         // texto do agente se lê inteiro; comando de ferramenta fica numa linha
-        const stem = (c.indent ? '│  ' : '') + (last ? '   ' : '│  ');
+        const stem = (c.indent ? '│ ' : '') + (last ? '  ' : '│ ');
         if (c.thought) {
           // raciocínio: texto corrido, apagado, quebrado na largura
           const ls = wrap(c.thought, width);
-          out.push({ kind: 'child', turn: turnId, connector: conn, glyph: c.glyph, gc: c.gc, name: c.name, nc: c.nc, detail: ls[0]!, dc: C.frame, right: '', ts: 0, showTime: false, voice: 'thought' });
-          for (const l of ls.slice(1)) out.push({ kind: 'cont', turn: turnId, connector: stem, glyph: '', gc: C.frame, name: '', nc: C.frame, detail: l, dc: C.frame, right: '', ts: 0, showTime: false, voice: 'thought' });
+          out.push({ kind: 'child', turn: turnId, connector: conn, glyph: c.glyph, gc: c.gc, name: c.name, nc: c.nc, detail: ls[0]!, dc: C.frame, right: '', ts: 0, showTime: false, voice: 'thought', indent: c.indent });
+          for (const l of ls.slice(1)) out.push({ kind: 'cont', turn: turnId, connector: stem, glyph: '', gc: C.frame, name: '', nc: C.frame, detail: l, dc: C.frame, right: '', ts: 0, showTime: false, voice: 'thought', indent: c.indent });
           continue;
         }
         if (c.tool || c.thinking) {
-          out.push({ kind: 'child', turn: turnId, connector: conn, glyph: c.glyph, gc: c.gc, name: c.name, nc: c.nc, detail: c.detail, dc: c.dc, right: c.right, ts: 0, showTime: false, ev: c.ev, voice: c.thinking ? 'thought' : undefined });
+          out.push({ kind: 'child', turn: turnId, connector: conn, glyph: c.glyph, gc: c.gc, name: c.name, nc: c.nc, detail: c.detail, dc: c.dc, right: c.right, ts: 0, showTime: false, ev: c.ev, voice: c.thinking ? 'thought' : undefined, indent: c.indent });
           continue;
         }
         // resposta em markdown: títulos, listas, código e ênfase viram cor
         const md = renderMd(c.full ?? c.detail, width);
         const first = md[0];
-        out.push({ kind: 'child', turn: turnId, connector: conn, glyph: c.glyph, gc: c.gc, name: agentName || c.name, nc: agentName ? C.link : c.nc, detail: first ? first.spans.map((x) => x.text).join('') : '', dc: c.dc, right: c.right, ts: 0, showTime: false, voice: 'agent', spans: first?.spans, ev: c.ev });
-        for (const l of md.slice(1)) out.push({ kind: 'cont', turn: turnId, connector: stem, glyph: '', gc: C.frame, name: '', nc: C.frame, detail: l.spans.map((x) => x.text).join(''), dc: c.dc, right: '', ts: 0, showTime: false, voice: 'agent', spans: l.spans, ev: c.ev });
+        const prevText = i > 0 && !pending[i - 1]!.tool && !pending[i - 1]!.thinking && !pending[i - 1]!.thought;   // primeira fala de uma sequência leva a hora
+        out.push({ kind: 'child', turn: turnId, connector: conn, glyph: c.glyph, gc: c.gc, name: agentName || c.name, nc: agentName ? C.link : c.nc, detail: first ? first.spans.map((x) => x.text).join('') : '', dc: c.dc, right: c.right, ts: c.ts ?? 0, showTime: !prevText && !!c.ts, voice: 'agent', spans: first?.spans, ev: c.ev, indent: c.indent });
+        for (const l of md.slice(1)) out.push({ kind: 'cont', turn: turnId, connector: stem, glyph: '', gc: C.frame, name: '', nc: C.frame, detail: l.spans.map((x) => x.text).join(''), dc: c.dc, right: '', ts: 0, showTime: false, voice: 'agent', spans: l.spans, ev: c.ev, indent: c.indent });
       }
     }
     out.push(BLANK); pending = [];
@@ -119,7 +137,8 @@ export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), wid
       const kind = /<task-notification/.test(e.full ?? e.text ?? '') ? t('notification') : t('injected context');
       const what = m ? `skill ${m[1]}` : kind;
       const summ = /<summary>([\s\S]*?)<\/summary>/.exec(e.full ?? e.text ?? '')?.[1]?.replace(/\s+/g, ' ').trim();
-      pending.push({ glyph: G.tool, gc: C.hold, name: what.split(' ')[0]!, nc: C.hold, detail: m ? `${m[1]} ${t('loaded')} — ${(e.text ?? '').split('#')[1]?.trim().slice(0, 60) ?? ''}` : (summ ?? e.text ?? '').slice(0, 200), dc: C.dim, right: '', indent, tool: what, out: 0 });
+      const img = /^\[Image: original (\d+)x(\d+)/.exec(e.full ?? e.text ?? '');   // a legenda que o Claude Code injeta para uma imagem colada
+      pending.push({ glyph: G.tool, gc: C.hold, name: what.split(' ')[0]!, nc: C.hold, detail: img ? t('image {0}×{1}', img[1]!, img[2]!) : m ? `${m[1]} ${t('loaded')} — ${(e.text ?? '').split('#')[1]?.trim().slice(0, 60) ?? ''}` : (summ ?? e.text ?? '').slice(0, 200), dc: C.dim, right: '', indent, tool: what, out: 0 });
       continue;
     }
     if (e.sidechain && e.role === 'user' && !e.tool) {
@@ -155,7 +174,7 @@ export function rows(evs: Ev[], cwd = '', expanded: Set<string> = new Set(), wid
         continue;
       }
       pending.push({ glyph: sub ? G.sub : G.tool, gc: bg ? C.hold : sub || research ? C.link : editable ? C.run : C.frame, name, nc: bg ? C.hold : sub || research ? C.link : editable ? C.ink : C.dim, detail: editable ? `${detail}  ${G.h}  ↵ diff` : detail, dc: C.dim, right, indent, tool: name, out: e.usage?.output ?? 0, ev: e.uuid });
-    } else if (e.text) pending.push({ glyph: ' ', gc: C.frame, name: '', nc: C.dim, detail: e.text, dc: C.ink, right, indent, out: e.usage?.output ?? 0, thinking: e.text === 'pensando', full: e.full, ev: e.uuid });
+    } else if (e.text) pending.push({ glyph: ' ', gc: C.frame, name: '', nc: C.dim, detail: e.text, dc: C.ink, right, indent, out: e.usage?.output ?? 0, thinking: e.text === 'pensando', full: e.full, ev: e.uuid, ts: e.ts });
   }
   flush();
   const last = evs[evs.length - 1];
@@ -194,23 +213,14 @@ function drawPanel(g: Grid, x: number, top: number, bottom: number, p: PanelData
   const w = g.W - 2 - x;
   let y = top;
   const head = (t: string) => { if (y <= bottom) { g.put(x, y, t, C.link); g.put(x + t.length + 1, y, G.h.repeat(Math.max(0, w - t.length - 1)), C.frame); } y++; };
-  const row = (k: string, v: string, col: RGB = C.ink) => { if (y <= bottom) { g.put(x, y, pad(k, 10), C.frame); g.put(x + 10, y, fit(v, w - 10), col); } y++; };
+  const row = (k: string, v: string, col: RGB = C.ink) => { if (y <= bottom) { g.put(x, y, pad(k, 10), C.dim); g.put(x + 10, y, fit(v, w - 10), col); } y++; };
   const line = (t: string, col: RGB = C.dim) => { if (y <= bottom) g.put(x, y, fit(t, w), col); y++; };
+  g.panel({ x: x - 1, y: top, w: w + 2, h: bottom - top + 1 }, BG.panel);
   for (let yy = top; yy <= bottom; yy++) g.put(x - 2, yy, G.v, C.frame);
 
-  head(t('memory'));
-  const frac = p.window ? p.context / p.window : 0;
-  row(t('context'), `${gauge(frac, 8)} ${Math.round(frac * 100)}%`, frac > 0.85 ? C.hold : C.run);
-  row('', `${tok(p.context)} ${t('of')} ${tok(p.window)}`, C.dim);
-  row(t('model'), p.model || '—');
-  row(t('effort'), `${p.effort || '—'}${p.perm ? `  ${G.h}  ${p.perm}` : ''}`);
-  row(t('events'), `${p.events}${p.compactions ? `  ${G.h}  ${p.compactions} compact.` : ''}`);
-  row(t('burn'), `${tok(p.burn)}${p.cost ? `  ${G.h}  $${p.cost.toFixed(3)}` : ''}`);
-  row(t('thought'), p.thinkingBlocks ? `${t('{0} blocks', p.thinkingBlocks)} ${G.h} t ${p.showThinking ? t('hides') : t('shows')}` : t('nothing recorded'), p.thinkingBlocks ? C.hold : C.dim);
-  y++;
-  head(t('links'));
-  if (!p.links.length) line(t('none — l links'));
-  for (const c of p.links) line(`${c.glyph} ${c.label}`, c.color);
+  // o que está acontecendo vem primeiro; a memória e as ligações, que mudam devagar, depois
+  head(t('now'));
+  line(p.state, C.ink);
   if (p.subs.length) {
     y++;
     head(`${t('subagents')} (${p.subs.length})`);
@@ -222,17 +232,31 @@ function drawPanel(g: Grid, x: number, top: number, bottom: number, p: PanelData
       if (s.state === 'running' && s.quietMs > 60_000) line(`  ${t('quiet for {0} — a long answer writes nothing until it lands', ago(s.quietMs))}`, C.frame);
     }
   }
-  y++;
-  head(t('tasks'));
-  if (!p.tasks.length) line(t('none in this session'));
-  for (const t of p.tasks) {
-    const mark = t.status === 'completed' ? G.running : t.status === 'in_progress' ? G.focus : G.idle;
-    const col = t.status === 'completed' ? C.run : t.status === 'in_progress' ? C.hold : C.dim;
-    line(`${mark} ${t.subject}`, col);
+  if (p.tasks.length) {
+    y++;
+    head(t('tasks'));
+    for (const t of p.tasks) {
+      const mark = t.status === 'completed' ? G.running : t.status === 'in_progress' ? G.focus : G.idle;
+      const col = t.status === 'completed' ? C.run : t.status === 'in_progress' ? C.hold : C.dim;
+      line(`${mark} ${t.subject}`, col);
+    }
   }
   y++;
-  head(t('now'));
-  line(p.state, C.ink);
+  head(t('memory'));
+  const frac = p.window ? p.context / p.window : 0;
+  if (y <= bottom) { g.put(x, y, pad(t('context'), 10), C.dim); const full = Math.round(frac * 8); g.put(x + 10, y, '━'.repeat(full), frac > 0.85 ? C.hold : C.run); g.put(x + 10 + full, y, '─'.repeat(8 - full), C.frame); g.put(x + 19, y, `${Math.round(frac * 100)}%`, frac > 0.85 ? C.hold : C.run); } y++;
+  row('', `${tok(p.context)} ${t('of')} ${tok(p.window)}`, C.dim);
+  row(t('model'), p.model || '—');
+  row(t('effort'), `${p.effort || '—'}${p.perm ? `  ${G.h}  ${p.perm}` : ''}`);
+  row(t('events'), `${p.events}${p.compactions ? `  ${G.h}  ${p.compactions} compact.` : ''}`);
+  row(t('burn'), `${tok(p.burn)}${p.cost ? `  ${G.h}  $${p.cost.toFixed(3)}` : ''}`);
+  row(t('thought'), p.thinkingBlocks ? `${t('{0} blocks', p.thinkingBlocks)} ${G.h} t ${p.showThinking ? t('hides') : t('shows')}` : t('nothing recorded'), p.thinkingBlocks ? C.hold : C.dim);
+  y++;
+  head(`${t('links')}${p.links.length ? ` (${p.links.length})` : ''}`);
+  if (!p.links.length) line(t('none — l links'));
+  const LINKS_MAX = 8;   // a lista inteira já está no mapa: aqui só o começo dela
+  for (const c of p.links.slice(0, LINKS_MAX)) line(`${c.glyph} ${c.label}`, c.color);
+  if (p.links.length > LINKS_MAX) line(t('+{0} more — all of them on the map', p.links.length - LINKS_MAX));
 }
 
 /**
@@ -260,13 +284,14 @@ export function renderPlain(g: Grid, all: Row[], scroll: number, name: string, h
 /** Altura da caixa de escrita no rodapé: 3 linhas quando aberta, 1 quando fechada. */
 export const THUMB_ROWS = 6;   // a tira de imagens coladas, acima da caixa: moldura de 5 linhas e um respiro
 const THUMB_W = 16, THUMB_MAX = 4;
-export const INPUT_H = (open: boolean, thumbs = 0) => (open ? 3 : 1) + (thumbs ? THUMB_ROWS : 0);
+/** A caixa de conversa está sempre lá, com três linhas; aberta ou fechada muda o que ela mostra, não o tamanho. */
+export const INPUT_H = (_open: boolean, thumbs = 0) => 3 + (thumbs ? THUMB_ROWS : 0);
 /**
  * Onde cada miniatura fica, em células: as células de dentro da moldura.
  * O desenho de verdade é o protocolo Kitty, depois do diff.
  */
 export function thumbBoxes(W: number, H: number, n: number): { x: number; y: number; cols: number; rows: number }[] {
-  const y0 = H - 4 - INPUT_H(true, n) + 1;   // o topo do bloco reservado
+  const y0 = H - 3 - INPUT_H(true, n) + 1;   // o topo do bloco reservado
   const fit = Math.max(1, Math.floor((W - 6) / THUMB_W));
   return Array.from({ length: Math.min(n, THUMB_MAX, fit) }, (_, i) => ({ x: 4 + i * THUMB_W, y: y0 + 1, cols: THUMB_W - 2, rows: 3 }));
 }
@@ -283,43 +308,47 @@ export function inputLayout(W: number, deep: boolean): { x: number; w: number; h
 export function renderAgent(
   g: Grid, n: AgentNode, s: Session | null, evs: Ev[], all: Row[], scroll: number, cursorRow: number,
   status: string, input: { text: string; cursor: number; deep?: boolean } | null, live: Live | null, chips: LinkChip[],
-  panel: PanelData | null = null, watching = false, marks: { hover?: string | null; flash?: string | null } = {},
+  panel: PanelData | null = null, watching = false, marks: { hover?: string | null; flash?: string | null; queued?: string } = {},
   attach: { name: string; bytes: number }[] = [],
 ) {
   const { W, H } = g;
   const withPanel = !!panel && panelFits(W);
   const treeW = withPanel ? W - panelW(W) : W;
   const ih = INPUT_H(!!input, input ? attach.length : 0);
-  const top = 3, bottom = H - 5 - ih;
+  const top = 3, bottom = H - 4 - ih;
   const view = Math.max(1, bottom - top + 1);
-  g.frame({ x: 0, y: 0, w: W, h: H }, `${G.running} ${n.name}`, C.inkHi);
-
-  // cabeçalho: diretório, contexto
   const home = process.env.HOME ?? '';
-  if (s) {
-    const win = windowOf(s.model, s.context), frac = s.context / win, gw = 12, right = ` ${tok(s.context)}/${tok(win)} `;
-    const gx = W - 2 - right.length - gw;
-    const cl = ` ${t('context')} `;
-    g.put(gx - cl.length, 0, cl, C.dim); g.put(gx, 0, gauge(frac, gw), frac > 0.85 ? C.hold : C.run); g.put(W - 2 - right.length, 0, right, C.dim);
-    g.put(6 + n.name.length, 0, fit(`${G.h} ${n.cwd.replace(home, '~')}`, Math.max(0, gx - 8 - cl.length - n.name.length)) + ' ', C.dim);
-  } else g.put(6 + n.name.length, 0, fit(`${G.h} ${n.cwd.replace(home, '~')} `, W - 10 - n.name.length), C.dim);
+  const pct = s ? Math.round(100 * s.context / windowOf(s.model, s.context)) : -1;
+  const ctxText = pct >= 0 ? ` ${pct}% ${t('context')}` : '', barW = pct >= 0 ? 10 : 0;
+  surface(g, fit(`anthive / ${n.name}`, W - barW - ctxText.length - 7));
+  if (pct >= 0) { const bx = W - 2 - ctxText.length - barW, full = Math.round((Math.min(100, pct) / 100) * barW); g.put(bx, 0, '━'.repeat(full), pct > 85 ? C.hold : C.run); g.put(bx + full, 0, '─'.repeat(barW - full), C.frame); g.put(bx + barW, 0, ctxText, C.dim); }
   const tag = live ? ` ${live.busy ? G.focus : G.running} ${t('chat live')}${live.deep ? ' · deep' : ''} ` : '';
-  const meta = [live?.model || s?.model || (s ? '—' : t('new session')), live?.effort || s?.effort || '', live?.permissionMode || '', s?.branch, evs.length ? t('{0} events', evs.length) : '', s ? t('{0} ago', ago(s.ageMs)) : ''].filter(Boolean).join(`  ${G.h}  `);
-  g.put(2, 1, fit(meta, W - 4 - tag.length - 1), live ? C.dim : C.frame);
+  const meta = [live?.model || s?.model || (s ? '—' : t('new session')), live?.effort || s?.effort || '', live?.permissionMode || '', s?.branch, evs.length ? t('{0} events', evs.length) : '', s ? t('{0} ago', ago(s.ageMs)) : ''].filter(Boolean).join('  ·  ');
+  g.put(2, 1, fit(meta, W - 4 - tag.length - 1), C.dim);
   if (tag) g.put(W - 2 - tag.length, 1, tag, C.run);
   // faixa de ligações
   let x = 2;
-  const lt = t('linked to'); g.put(x, 2, lt, C.frame); x += lt.length + 2;
-  if (!chips.length) g.put(x, 2, t('nothing yet — l links a note, file, service or agent'), C.frame);
-  for (const c of chips) { const t = `${c.glyph} ${c.label}`; if (x + t.length > W - 3) break; g.put(x, 2, t, c.color); x += t.length + 3; }
+  const lt = t('Context'); g.put(x, 2, lt, C.dim); x += lt.length + 2;
+  if (!chips.length) g.put(x, 2, t('l to link notes, files or another agent'), C.dim);
+  // cada chip cabe em 32 células; o que não cabe na linha vira uma contagem
+  for (let i = 0; i < chips.length; i++) {
+    const c = chips[i]!, label = `${c.glyph} ${fit(c.label, 32)}`, more = `+${chips.length - i}`;
+    if (x + [...label].length > W - 3 - more.length - 2) { g.put(x, 2, more, C.dim); break; }
+    g.put(x, 2, label, c.color); x += [...label].length + 3;
+  }
 
   // árvore
-  const timeW = 8, tokW = 6, connW = 7, nameW = 9, nameX = 2 + connW + 2, detailX = nameX + nameW;
-  const avail = detailWidth(W, withPanel);
+  const nameW = nameWidth(n.name), timeW = TIME_W, tokW = TOK_W, connW = CONN_W, nameX = 2 + connW + 2, detailX = nameX + nameW;
+  const avail = detailWidth(W, withPanel, nameW);
   // hora e tokens acompanham o texto em vez de flutuar na borda da tela, e o texto para antes deles
   const rightEdge = Math.min(treeW, detailX + Math.min(avail, PROSE_MAX) + timeW + tokW + 6);
   const detailW = Math.max(8, Math.min(avail, rightEdge - detailX - timeW - tokW - 3));
-  if (!all.length) g.put(2, top + 1, s ? t('no events') : t('new session — i writes the first prompt'), C.frame);
+  if (!all.length) {
+    const y = Math.min(top + 4, bottom - 2);
+    g.put(4, y, fit(watching ? t('Waiting for activity') : t('What would you like to build?'), treeW - 8), strong(C.inkHi));
+    g.put(4, y + 1, fit(watching ? t('This conversation will appear here.') : t('Press i to give {0} a task.', n.name), treeW - 8), C.dim);
+    if (!watching) g.put(4, y + 3, fit(t('Link context with l, or explore all actions with ?.'), treeW - 8), C.dim);
+  }
   const slice = all.slice(scroll, scroll + view);
   for (let i = 0; i < slice.length; i++) {
     const r = slice[i]!, y = top + i; if (r.kind === 'blank') continue;
@@ -331,14 +360,17 @@ export function renderAgent(
     if (band) g.fill({ x: nameX - 1, y, w: detailX + detailW - nameX + 1, h: 1 }, band);
     if (r.voice === 'agent') g.put(detailX - 1, y, '▎', C.link);
     if (r.voice === 'thought') g.put(detailX - 1, y, G.dV, C.sparkH);
-    g.put(2, y, pad(r.connector, connW), C.frame); g.put(2 + connW, y, r.glyph, r.gc);
-    if (r.name) g.put(nameX, y, pad(r.name, nameW - 1), on && r.kind !== 'turn' ? C.inkHi : r.nc, band);
+    const ix = (r.indent ?? 0) * 2;   // o que veio de um subagente entra dois passos
+    const prev = all[scroll + i - 1];
+    const named = !!r.name && !(r.voice === 'agent' && prev?.voice === 'agent' && prev.name === r.name);   // o nome só quando muda quem fala
+    g.put(2 + connW + ix, y, r.glyph, r.gc);
+    if (named) g.put(nameX + ix, y, pad(r.name, Math.max(1, nameW - 1 - ix)), on && r.kind !== 'turn' ? C.inkHi : r.kind === 'turn' || r.voice === 'agent' ? strong(r.nc) : r.nc, band);
     let detail = r.detail, dc = r.dc;
     if (r.kind === 'now' && live?.busy) { const sl = live.subs ? subsLine(live.subs) : ''; detail = sl || (live.thinking ? `${t('thinking')}${G.ell} ${tok(live.thinking)}` : live.summary || `${t('thinking')}${G.ell}`); dc = C.run; }
     if (r.spans && !on) { let sx = detailX; for (const sp of r.spans) { g.put(sx, y, fit(sp.text, Math.max(0, detailX + detailW - sx)), sp.color, band); sx += [...sp.text].length; if (sx >= detailX + detailW) break; } }
     else g.put(detailX, y, fit(detail, detailW), on ? C.inkHi : dc, band);
-    if (r.right) g.put(rightEdge - 3 - timeW - tokW, y, padStart(r.right, tokW), C.frame);
-    if (r.showTime) g.put(rightEdge - 2 - timeW, y, hhmm(r.ts), C.frame);
+    if (r.right) g.put(rightEdge - 3 - timeW - tokW, y, padStart(r.right, tokW), C.dim);
+    if (r.showTime) g.put(rightEdge - 2 - timeW, y, hhmm(r.ts).slice(0, 5), C.dim);
     if (block && !!r.name && r.ev) {
       const tip = r.ev === marks.flash ? ` ${t('copied')} ` : ` y ${t('copies')} `;
       const tx = rightEdge - 2 - [...tip].length;
@@ -361,27 +393,33 @@ export function renderAgent(
     g.put(tx, boxes[0]!.y + 1, fit(t('⌫ on an empty line drops the last'), Math.max(0, W - tx - 2)), C.frame);
   }
 
-  // a caixa de escrita, sempre encostada no rodapé
-  const by = H - 4 - INPUT_H(!!input) + 1;
+  // a caixa de conversa, sempre no rodapé: quem e em que estado no título, modelo · esforço · permissão na borda
+  const by = H - 3 - INPUT_H(!!input) + 1;
+  const busy = !!live?.busy, deep = !!input?.deep;
+  const frameColor = watching ? C.frame : deep ? C.hold : input ? C.link : busy ? C.run : C.frame;
+  const title = watching ? t('Watching {0}', n.name) : deep ? t('deep search with {0}', n.name) : busy ? `${n.name}  ${G.running} ${t('working')}` : n.name;
+  g.panel({ x: 1, y: by, w: W - 2, h: 3 }, BG.panel);
+  g.frame({ x: 1, y: by, w: W - 2, h: 3 }, title, watching ? C.dim : deep ? C.hold : input ? C.link : busy ? C.run : C.inkHi, frameColor);
+  const modes = watching ? '' : [live?.model || s?.model, live?.effort || s?.effort, live?.permissionMode].filter(Boolean).join(' · ');
+  if (modes && [...title].length + [...modes].length + 14 < W) g.put(W - 4 - [...modes].length, by, ` ${modes} `, C.dim);
+  g.fill({ x: 2, y: by + 1, w: W - 4, h: 1 }, BG.input);
   if (input) {
-    const deep = !!input.deep, lay = inputLayout(W, deep);
-    g.panel({ x: 1, y: by, w: W - 2, h: 3 }, BG.panel);
-    g.frame({ x: 1, y: by, w: W - 2, h: 3 }, deep ? t('deep search with {0}', n.name) : t('write to {0}', n.name), deep ? C.hold : C.run, deep ? C.hold : C.link);
-    g.fill({ x: 2, y: by + 1, w: W - 4, h: 1 }, BG.input);
+    const lay = inputLayout(W, deep);
     g.put(3, by + 1, `${G.arrow} `, deep ? C.hold : C.run, BG.input);
     if (deep) g.put(5, by + 1, DEEP_CHIP, C.hold, BG.input);
     g.put(lay.x, by + 1, pad(input.text, lay.w), C.inkHi, BG.input);
-    if (!input.text) g.put(lay.x, by + 1, fit(deep ? t('a question for the repo, the hive and the web') : t('what it should do now'), lay.w), C.frame, BG.input);
-    g.put(W - 3 - lay.hint.length, by + 1, lay.hint, C.frame, BG.input);
+    if (!input.text) g.put(lay.x, by + 1, fit(marks.queued ? t('queued: {0}  ·  ⌫ drops it', marks.queued) : deep ? t('a question for the repo, the hive and the web') : busy ? t('Type now — it goes out when this answer finishes') : t('Message {0}…', n.name), lay.w), marks.queued ? C.hold : C.dim, BG.input);
+    g.put(W - 3 - lay.hint.length, by + 1, lay.hint, C.dim, BG.input);
     g.cursor = { x: lay.x + input.cursor, y: by + 1 };
+  } else if (watching) {
+    g.put(3, by + 1, fit(t('its parent runs this session · esc goes back'), W - 6), C.dim, BG.input);
   } else {
-    g.put(2, by, `${G.arrow} `, C.frame);
-    g.put(4, by, fit(watching ? `${t('watching {0} — its parent runs it; esc goes back', n.name)}` : `${t('write to {0}', n.name)}  ${G.h}  i  ${G.h}  D ${t('deep search')}`, W - 6), C.frame);
+    g.put(3, by + 1, fit(marks.queued ? t('queued: {0}  ·  i to edit, ⌫ drops it', marks.queued) : t('i  Message {0}…', n.name), W - 6), marks.queued ? C.hold : C.dim, BG.input);
+    g.hit('action:i', { x: 2, y: by, w: W - 4, h: 3 });
   }
-  g.put(0, H - 3, G.teeL + G.h.repeat(W - 2) + G.teeR, C.frame);
-  keybar(g, H - 2, input
+  keybar(g, H - 1, input
     ? [['↵', input.deep ? t('research') : t('send')], ['^v', t('paste image')], ['tab', input.deep ? t('plain turn') : t('deep search')], ['esc', t('leave the field')]]
     : watching
     ? [['↑↓', t('navigate')], ['↵', t('turn')], ['t', t('thoughts')], ['y', t('copy')], ['s', t('select')], ['esc', t('project')]]
-    : [['i', t('write')], ['D', t('deep')], ['↑↓', t('navigate')], ['↵', t('turn')], ['t', t('thoughts')], ['y', t('copy')], ['s', t('select')], ['m', t('model')], ['e', t('effort')], ['p', t('permissions')], ['l', t('link')], ...(live ? ([['x', t('stop chat')]] as [string, string][]) : []), ['esc', t('project')]], status);
+    : [['i', t('message')], ['y', t('copy')], ['↵', t('expand')], [']', t('details')], ['D', t('deep search')], ['↑↓', t('navigate')], ['t', t('thoughts')], ['s', t('select text')], ['m', t('model')], ['e', t('effort')], ['p', t('permissions')], ['l', t('link')], ...(live ? ([['x', t('stop chat')]] as [string, string][]) : []), ['g', t('first message')], ['G', t('latest message')], ['esc', t('project')]], status);
 }

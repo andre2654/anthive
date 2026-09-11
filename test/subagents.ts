@@ -141,7 +141,7 @@ const before = app.evs.length;
 must('the parent chat writes into its own transcript, not the one being watched', app.evs.length === before);
 app.render();
 const w = app.grid.toString();
-must('the view says it is read-only and offers no input', w.includes('watching') && !w.includes('write to') && !w.includes('D deep'));
+must('the view says it is read-only and offers no input', w.includes('Watching') && !w.includes('write to') && !w.includes('D deep'));
 (app as any).startChat();
 must('starting a chat on a subagent is refused', stops === 0 && app.status.includes('watch only'));
 app.sel = 'sub-A1'; (app as any).removeSel();

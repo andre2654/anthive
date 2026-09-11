@@ -38,7 +38,7 @@ const ev = { uuid: 'u1', parent: null, sidechain: false, type: 'user', ts: 1, ro
 must('e vira mesmo uma linha sua na árvore', rows([ev], '', new Set(), 40, false, 'api').some((r) => r.kind === 'turn' && r.detail.includes('[image]')));
 
 // --- a tira de miniaturas ocupa espaço só quando há anexo ---
-must('sem anexo a caixa tem a altura de sempre', INPUT_H(true, 0) === 3 && INPUT_H(false, 0) === 1);
+must('sem anexo a caixa tem a altura de sempre, aberta ou fechada', INPUT_H(true, 0) === 3 && INPUT_H(false, 0) === 3);
 must('com anexo a caixa reserva a tira', INPUT_H(true, 2) === 3 + THUMB_ROWS);
 const boxes = thumbBoxes(120, 30, 3);
 must('as miniaturas ficam lado a lado, acima da caixa', boxes.length === 3 && boxes[1]!.x > boxes[0]!.x && boxes.every((b) => b.y > 0 && b.y < 30 - 4));

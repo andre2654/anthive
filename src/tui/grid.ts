@@ -18,6 +18,8 @@ export class Grid {
   private co: Int32Array;
   private bgc: Int32Array;
   hits: Hit[] = [];
+  /** Available commands for the contextual action menu. */
+  actions: [string, string][] = [];
   /** Onde o cursor real do terminal deve aparecer; null esconde. */
   cursor: { x: number; y: number } | null = null;
 
@@ -33,6 +35,7 @@ export class Grid {
     this.co.fill(packed(C.ink));
     this.bgc.fill(-1);
     this.hits = [];
+    this.actions = [];
     this.cursor = null;
   }
 

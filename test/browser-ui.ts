@@ -34,7 +34,7 @@ must('modo digitar avisa e troca as teclas', t3.includes('typing into the page')
 const g4 = new Grid(120, 20);
 renderBrowser(g4, br, { live: null, box: null, typing: false, canImg: false, booting: '' }, '', ['api']);
 const t4 = g4.toString();
-must('sem imagem, explica e mostra o snapshot com refs', t4.includes('cannot draw images') && t4.includes('[ref=e2]'));
+must('sem imagem, explica e mostra o snapshot com refs', t4.includes('Page snapshot') && t4.includes('[ref=e2]'));
 
 const fr = snapshotRefs('- generic [ref=f1e1]:\n  - cell "ord_9f21" [ref=f1e22]\n  - button "Retry" [ref=e3]');
 must('refs with a frame prefix (f1e22) are extracted too', fr.length === 3 && fr[1]!.ref === 'f1e22' && fr[1]!.text === 'cell "ord_9f21"' && fr[2]!.ref === 'e3');

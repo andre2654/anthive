@@ -11,17 +11,17 @@
 export type RGB = readonly [number, number, number] | readonly [number, number, number, 1];
 
 export const C = {
-  frame:  [0x39, 0x42, 0x4f],
-  dim:    [0x6d, 0x78, 0x89],
+  frame:  [0x36, 0x40, 0x52],
+  dim:    [0x92, 0x9d, 0xb1],
   ink:    [0xcf, 0xd6, 0xe2],
   quiet:  [0xa6, 0xb2, 0xc2],   // código e citação: legível, sem competir com a prosa
   inkHi:  [0xf4, 0xf7, 0xfb],
   run:    [0x5e, 0xe0, 0xa0],
   hold:   [0xe8, 0xb0, 0x4b],
   dead:   [0xf4, 0x68, 0x5c],
-  idle:   [0x5b, 0x66, 0x75],
-  link:   [0xa5, 0x8c, 0xf0],
-  linkDim:[0x5c, 0x4d, 0x8a],
+  idle:   [0x92, 0x9d, 0xb1],
+  link:   [0xbb, 0xaa, 0xff],
+  linkDim:[0x96, 0x8c, 0xbd],
   sparkR: [0x2f, 0x7a, 0x56],
   sparkH: [0x7a, 0x60, 0x29],
   sparkI: [0x3a, 0x42, 0x4e],
@@ -78,6 +78,15 @@ export function isNarrow(ch: string): boolean {
   if (cp >= 0xff00 && cp <= 0xff60) return false;
   return true;
 }
+
+/**
+ * Conteúdo vindo de fora, pronto para a grade: o que ocuparia duas células
+ * (emoji, CJK) e os caracteres de controle saem, em vez de virarem `?`; os
+ * espaços que sobram são recolhidos.
+ */
+export const plain = (s: string) => [...s].filter((ch) => ch >= ' ' && isNarrow(ch)).join('').replace(/\s{2,}/g, ' ').trim();
+/** Um resumo de uma linha sem as marcas de markdown: **negrito**, `código`, títulos e marcadores. */
+export const plainMd = (s: string) => plain(s.replace(/\*\*|__|`+/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/^[#>\-*]+\s*/gm, ''));
 
 /** Trunca para caber em `w` células, com reticências. Conteúdo nunca empurra borda. */
 export function fit(s: string, w: number): string {
@@ -148,8 +157,13 @@ export const bgAnsi = (c: RGB) => `\x1b[48;2;${c[0]};${c[1]};${c[2]}m`;
 
 /** Fundos de superfície — usados no modal e na linha selecionada. */
 export const BG = {
-  panel: [0x14, 0x18, 0x21],
-  input: [0x1c, 0x22, 0x2e],
-  sel:   [0x1b, 0x1f, 0x2c],
+  base:  [0x0e, 0x12, 0x1b],
+  panel: [0x17, 0x1d, 0x29],
+  input: [0x20, 0x29, 0x38],
+  sel:   [0x2a, 0x2b, 0x43],
   copy:  [0x1d, 0x2e, 0x2a],   // o piscar de "copiado"
+  // pílulas de estado: o texto colorido sobre um fundo da mesma família, para o estado ler-se de longe
+  run:   [0x14, 0x30, 0x27],
+  hold:  [0x35, 0x2a, 0x12],
+  dead:  [0x3c, 0x1f, 0x22],
 } satisfies Record<string, RGB>;

@@ -132,6 +132,12 @@ export class Form {
     }
 
     const f = this.current;
+    if (k.k === 'paste') {
+      if (f.preset) f.input.set('');
+      f.input.insert(k.text.replace(/[\r\n]+/g, ' '));
+      f.preset = false; f.cycleFrom = undefined;
+      return 'pending';
+    }
     // digitar por cima de um valor sugerido substitui; editar de propósito não
     if (f.preset && k.k === 'char' && k.c >= ' ') { f.input.set(''); }
     f.preset = false;
