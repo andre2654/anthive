@@ -88,6 +88,17 @@ Anthive is an independent project. It is not affiliated with or endorsed by Anth
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Tests are hermetic (`bun run test`); the ones that need Chrome or an API key are opt-in.
 
+## Menu bar
+
+A hexagon in the macOS menu bar: filled while an agent runs, with the running count next to it, orange with `◆ N` when something needs you, and the 5-hour window once it passes 80%. Click it and a panel opens: two tiles (running, needs you), what needs you with Allow and Deny right there, the projects with their agents and what they are doing, and your 5-hour and 7-day windows as big numbers. A click on a project opens it in Ghostty. It notifies you when a new request appears.
+
+```sh
+bun run menubar        # builds dist/Anthive.app with the Swift in Xcode's Command Line Tools
+open dist/Anthive.app  # "Open at Login" is behind the gear
+```
+
+It reads the hive through `anthive status --json` every ten seconds and only ever writes an answer to a permission request, through `anthive decide`. `anthive status` prints the same snapshot as text for a tmux status line or a script. To look at the panel without a screen, `ANTHIVE_MENUBAR_OPEN=1 ANTHIVE_MENUBAR_SNAP=/tmp/panel.png dist/Anthive.app/Contents/MacOS/Anthive` opens it by itself and draws it to a PNG.
+
 ## License
 
 [MIT](LICENSE)

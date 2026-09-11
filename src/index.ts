@@ -31,6 +31,23 @@ if (cmd === 'install-mcp') {
   console.log(`bus registered in ${file}`); process.exit(0);
 }
 
+if (cmd === 'status') {
+  // the whole hive in one read, for the menu bar app and for scripts
+  const { statusSnapshot, statusText } = await import('./core/status.ts');
+  const s = await statusSnapshot();
+  console.log(rest.includes('--json') ? JSON.stringify(s) : statusText(s));
+  process.exit(0);
+}
+
+if (cmd === 'decide') {
+  // answer a permission request from outside the TUI (the menu bar does this)
+  const [id, how] = rest;
+  if (!id || (how !== 'allow' && how !== 'deny')) { console.error('usage: anthive decide <request-id> allow|deny'); process.exit(2); }
+  const A = await import('./core/approvals.ts');
+  try { await A.decide(id, how, `${how === 'allow' ? 'allowed' : 'denied'} from the menu bar`); console.log(`${how}: ${id}`); process.exit(0); }
+  catch { console.error(`no pending request ${id}`); process.exit(1); }
+}
+
 if (cmd === 'ls') {
   for (const c of await P.homeCards()) console.log(`${c.registered ? '●' : '○'} ${c.project.name.padEnd(24)} ${String(c.sessions.length).padStart(3)} sessions  ${c.project.cwd}`);
   process.exit(0);
@@ -42,6 +59,8 @@ if (cmd === '--help' || cmd === '-h' || cmd === 'help') {
   anthive               open the projects screen
   anthive <project>     open a project by name, id or a piece of its path
   anthive ls            list projects as text
+  anthive status        who is running, what needs you, your limits (--json for scripts and the menu bar)
+  anthive decide <id> allow|deny   answer a permission request by its id
   anthive doctor        check what this machine has (Claude Code, Chrome, terminal images…)
   anthive install-mcp   register the agent bus in the current directory's .mcp.json
   anthive mcp           run the MCP server (agents call this; you don't)
