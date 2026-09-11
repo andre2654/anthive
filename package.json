@@ -21,7 +21,8 @@
     "test:deep": "ANTHIVE_HOME=$(mktemp -d) bun run test/deep-live.ts"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "typescript": "^7.0.2"
   },
   "description": "An ant hive for your Claude Code agents: a live map of agents, notes, memory, services and a browser — in the terminal.",
   "license": "MIT",
